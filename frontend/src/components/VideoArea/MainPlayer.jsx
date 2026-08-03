@@ -1,0 +1,115 @@
+import { useEffect } from "react";
+
+function MainPlayer({
+  selectedImage,
+  isGenerating,
+  generatedVideoUrl,
+  isPlaying,
+  setIsPlaying,
+  togglePlay,
+  videoRef
+}) {
+  // Autoplay generated video when ready
+  useEffect(() => {
+    if (generatedVideoUrl && videoRef.current) {
+      videoRef.current.currentTime = 0;
+      videoRef.current
+        .play()
+        .then(() => setIsPlaying(true))
+        .catch((e) => console.log("Autoplay handled:", e));
+    }
+  }, [generatedVideoUrl]);
+
+  return (
+    <div className="glass-panel rounded-2xl overflow-hidden aspect-video relative shadow-2xl ring-1 ring-white/10 mb-6 bg-black">
+      
+      {/* 1. TALKING VIDEO PLAYER */}
+      {generatedVideoUrl && (
+        <video 
+          ref={videoRef}
+          src={generatedVideoUrl} 
+          className={`w-full h-full object-cover transition-opacity duration-500 ${
+            isPlaying ? 'opacity-100 z-10 relative' : 'opacity-0 absolute inset-0 z-0'
+          }`}
+          onPlay={() => setIsPlaying(true)}
+          onPause={() => setIsPlaying(false)}
+          onEnded={() => setIsPlaying(false)}
+        />
+      )}
+
+      {/* 2. LIVE AVATAR STANDBY FEED (Display frozen image feed when not playing) */}
+      {(!isPlaying || !generatedVideoUrl) && (
+        <div className="absolute inset-0 flex items-center justify-center bg-neutral-950 overflow-hidden z-0">
+          {selectedImage ? (
+            <div className="relative w-full h-full">
+              <img 
+                src={selectedImage} 
+                alt="Live Avatar Standby" 
+                className={`w-full h-full object-cover transition-all duration-700 ${
+                  isGenerating ? 'scale-105 filter brightness-90 animate-pulse' : 'scale-100'
+                }`}
+              />
+              <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-black/20" />
+            </div>
+          ) : (
+            <div className="flex flex-col items-center justify-center text-center p-6">
+              <span className="material-symbols-outlined text-outline/30 text-6xl mb-3">account_circle</span>
+              <p className="text-outline text-xs font-label uppercase tracking-widest">
+                Select or Upload an Avatar Image to start Live Standby Feed
+              </p>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* 3. LIVE STATUS INDICATORS */}
+      <div className="absolute top-4 left-4 z-20 flex items-center gap-2">
+        {isPlaying ? (
+          <span className="px-3 py-1 rounded-full bg-emerald-500/20 border border-emerald-500/40 text-emerald-400 font-mono text-[10px] flex items-center gap-1.5 backdrop-blur-md shadow-lg">
+            <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping" />
+            LIVE AVATAR TALKING...
+          </span>
+        ) : isGenerating ? (
+          <span className="px-3 py-1 rounded-full bg-amber-500/20 border border-amber-500/40 text-amber-400 font-mono text-[10px] flex items-center gap-1.5 backdrop-blur-md shadow-lg">
+            <span className="w-2 h-2 rounded-full bg-amber-400 animate-pulse" />
+            LISTENING & PROCESSING RESPONSE...
+          </span>
+        ) : selectedImage ? (
+          <span className="px-3 py-1 rounded-full bg-red-500/20 border border-red-500/40 text-red-400 font-mono text-[10px] flex items-center gap-1.5 backdrop-blur-md shadow-lg">
+            <span className="w-2 h-2 rounded-full bg-red-500 animate-pulse" />
+            LIVE STANDBY - SAY SOMETHING
+          </span>
+        ) : null}
+      </div>
+
+      {/* 4. PROCESSING OVERLAY */}
+      {isGenerating && (
+        <div className="absolute inset-0 flex flex-col items-center justify-center bg-black/60 z-30 backdrop-blur-xs">
+          <span className="material-symbols-outlined text-secondary text-5xl animate-spin mb-3">auto_awesome</span>
+          <p className="text-secondary font-label tracking-widest text-xs animate-pulse uppercase">
+            Synthesizing Talking Avatar...
+          </p>
+        </div>
+      )}
+
+      {/* 5. PLAY / REPLAY CONTROLS */}
+      {generatedVideoUrl && !isGenerating && (
+        <div 
+          className={`absolute inset-0 z-20 flex items-center justify-center transition-all duration-300 ${
+            isPlaying ? 'bg-black/0 opacity-0 hover:opacity-100' : 'bg-black/30 opacity-100'
+          }`}
+          onClick={togglePlay}
+        >
+          <button className="w-16 h-16 rounded-full border border-secondary/50 bg-secondary/10 backdrop-blur-md flex items-center justify-center hover:scale-110 hover:bg-secondary/20 transition-all group cursor-pointer shadow-2xl">
+            <span className="material-symbols-outlined text-secondary text-3xl group-hover:text-white transition-colors">
+              {isPlaying ? 'pause' : 'play_arrow'}
+            </span>
+          </button>
+        </div>
+      )}
+
+    </div>
+  );
+}
+
+export default MainPlayer;

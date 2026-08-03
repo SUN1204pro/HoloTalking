@@ -1,0 +1,36 @@
+# Environment & Secrets
+.env
+.env.local
+.env.*.local
+*.pem
+
+# Python Virtual Environments & Caches
+__pycache__/
+*.py[cod]
+*$py.class
+venv/
+.venv/
+env/
+ENV/
+*.so
+
+# SadTalker Large Model Weights & Temporary Files
+backend/SadTalker/checkpoints/
+backend/SadTalker/gfpgan/
+backend/SadTalker/results/
+backend/SadTalker/temp_files/
+backend/SadTalker/venv/
+*.pth
+*.pt
+*.tar.gz
+
+# Frontend Build & Node Modules
+node_modules/
+frontend/node_modules/
+frontend/dist/
+.idea/
+.vscode/
+
+# OS / System Junk
+.DS_Store
+Thumbs.db
