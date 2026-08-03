@@ -15,8 +15,9 @@ function App() {
   const [selectedVoice, setSelectedVoice] = useState("Thái Sơn");
   const [useGemini, setUseGemini] = useState(false);
   const [persona, setPersona] = useState("");
+  const [fastMode, setFastMode] = useState(true);
   const [preprocess, setPreprocess] = useState("crop");
-  const [enhancer, setEnhancer] = useState("gfpgan");
+  const [enhancer, setEnhancer] = useState("none");
   const [still, setStill] = useState(true);
   const [expressionScale, setExpressionScale] = useState(1.0);
   const [spokenText, setSpokenText] = useState(null);
@@ -183,6 +184,8 @@ function App() {
           setStill={setStill}
           expressionScale={expressionScale}
           setExpressionScale={setExpressionScale}
+          fastMode={fastMode}
+          setFastMode={setFastMode}
           isGenerateReady={isGenerateReady}
           isGenerating={isGenerating}
           handleGenerate={handleGenerate}

@@ -9,7 +9,7 @@ function Sidebar({
   scriptText, setScriptText, audioFile, setAudioFile,
   selectedVoice, setSelectedVoice, useGemini, setUseGemini, persona, setPersona,
   preprocess, setPreprocess, enhancer, setEnhancer, still, setStill,
-  expressionScale, setExpressionScale,
+  expressionScale, setExpressionScale, fastMode, setFastMode,
   isGenerateReady, isGenerating, handleGenerate, errorMessage
 }) {
   return (
@@ -42,6 +42,7 @@ function Sidebar({
             enhancer={enhancer} setEnhancer={setEnhancer}
             still={still} setStill={setStill}
             expressionScale={expressionScale} setExpressionScale={setExpressionScale}
+            fastMode={fastMode} setFastMode={setFastMode}
           />
         </div>
 

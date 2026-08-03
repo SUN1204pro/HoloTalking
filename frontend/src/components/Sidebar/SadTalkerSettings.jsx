@@ -4,12 +4,61 @@ function SadTalkerSettings({
   preprocess, setPreprocess,
   enhancer, setEnhancer,
   still, setStill,
-  expressionScale, setExpressionScale
+  expressionScale, setExpressionScale,
+  fastMode, setFastMode
 }) {
   const [isOpen, setIsOpen] = useState(false);
 
+  const handleToggleFastMode = (enabled) => {
+    setFastMode(enabled);
+    if (enabled) {
+      setPreprocess("crop");
+      setEnhancer("none");
+      setStill(true);
+    } else {
+      setPreprocess("crop");
+      setEnhancer("gfpgan");
+      setStill(false);
+    }
+  };
+
   return (
     <div className="mt-3 border border-outline-variant/30 bg-black/20 rounded-xl overflow-hidden">
+      {/* FAST MODE BANNER TOGGLE */}
+      <div className="p-3 bg-gradient-to-r from-amber-500/10 via-black/40 to-black/20 border-b border-outline-variant/20 flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <span className="material-symbols-outlined text-amber-400 text-base animate-pulse">
+            bolt
+          </span>
+          <div>
+            <div className="font-label text-[11px] font-bold text-on-surface tracking-wider uppercase flex items-center gap-1.5">
+              FAST MODE
+              <span className={`px-1.5 py-0.2 text-[9px] rounded font-mono ${fastMode ? 'bg-amber-400/20 text-amber-300 border border-amber-400/40' : 'bg-surface-container-highest text-outline'}`}>
+                {fastMode ? "LOW LATENCY (~3s)" : "MAX QUALITY (~10s)"}
+              </span>
+            </div>
+            <p className="text-[10px] text-outline">
+              {fastMode ? "Fast generation without GFPGAN polish" : "Full 3D motion & GFPGAN face enhancer"}
+            </p>
+          </div>
+        </div>
+
+        <button
+          type="button"
+          onClick={() => handleToggleFastMode(!fastMode)}
+          className={`relative inline-flex h-5 w-9 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
+            fastMode ? 'bg-amber-400' : 'bg-surface-container-highest'
+          }`}
+        >
+          <span
+            className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-black shadow ring-0 transition duration-200 ease-in-out ${
+              fastMode ? 'translate-x-4' : 'translate-x-0'
+            }`}
+          />
+        </button>
+      </div>
+
+      {/* ADVANCED SETTINGS HEADER */}
       <button
         type="button"
         onClick={() => setIsOpen(!isOpen)}
@@ -17,7 +66,7 @@ function SadTalkerSettings({
       >
         <span className="flex items-center gap-1.5">
           <span className="material-symbols-outlined text-sm">tune</span>
-          SadTalker AI Settings
+          Advanced Pipeline Controls
         </span>
         <span className="material-symbols-outlined text-sm">
           {isOpen ? "expand_less" : "expand_more"}
@@ -49,7 +98,7 @@ function SadTalkerSettings({
               className="w-full bg-black/50 border border-outline-variant/40 rounded-lg p-1.5 text-xs text-on-surface outline-none"
             >
               <option value="gfpgan">GFPGAN (High Quality Face Polish)</option>
-              <option value="none">None (Faster processing)</option>
+              <option value="none">None (Fastest - Low Latency)</option>
             </select>
           </div>
 
@@ -72,7 +121,7 @@ function SadTalkerSettings({
 
           {/* Still Mode */}
           <div className="flex items-center justify-between pt-1">
-            <span className="text-[10px] text-outline font-label">STILL MODE (NO HEAD SHAKE)</span>
+            <span className="text-[10px] text-outline font-label">STILL MODE (STATIC HEAD)</span>
             <input
               type="checkbox"
               checked={still}
@@ -87,3 +136,4 @@ function SadTalkerSettings({
 }
 
 export default SadTalkerSettings;
+

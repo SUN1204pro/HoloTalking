@@ -3,6 +3,7 @@ import sys
 import shutil
 import asyncio
 import glob
+import time
 from datetime import datetime
 from fastapi import FastAPI, UploadFile, File, Form, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -216,6 +217,7 @@ async def generate_video(
 
     ans = " ".join(cmd_parts)
 
+    start_time = time.time()
     try:
         process = await asyncio.create_subprocess_shell(ans)
         await process.communicate()
@@ -223,6 +225,8 @@ async def generate_video(
             raise HTTPException(status_code=500, detail="SadTalker video generation script failed.")
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+    
+    elapsed_seconds = round(time.time() - start_time, 2)
 
     list_of_videos = glob.glob(f'{run_dir}/**/*.mp4', recursive=True)
     if not list_of_videos:
@@ -236,7 +240,8 @@ async def generate_video(
     return {
         "status": "success",
         "video_url": f"http://127.0.0.1:8000/static/test_run_{timestamp}/{final_video_name}",
-        "spoken_text": final_speak_text if inputType == "text" else None
+        "spoken_text": final_speak_text if inputType == "text" else None,
+        "generation_time_seconds": elapsed_seconds
     }
 
 
