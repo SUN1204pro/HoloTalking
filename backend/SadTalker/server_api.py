@@ -241,7 +241,7 @@ async def generate_video(
     persona: str = Form(None),
     api_key: str = Form(None),
     voice_name: str = Form("Thái Sơn"),
-    preprocess: str = Form("resize"),
+    preprocess: str = Form("crop"),
     enhancer: str = Form("gfpgan"),
     still: bool = Form(True),
     expression_scale: float = Form(1.0),
@@ -359,7 +359,7 @@ async def generate_video(
         "--driven_audio", f'"{audio_path}"',
         "--source_image", f'"{output_path}"',
         "--result_dir", f'"{run_dir}"',
-        "--preprocess", preprocess if preprocess in ["resize", "full", "extfull", "crop", "extcrop"] else "resize",
+        "--preprocess", preprocess if preprocess in ["crop", "extcrop", "full", "extfull", "resize"] else "crop",
         "--expression_scale", str(expression_scale),
         "--pose_style", str(pose_style)
     ]
@@ -500,7 +500,7 @@ async def agent_chat(
     history: str = Form(None),
     api_key: str = Form(None),
     voice_name: str = Form("Thái Sơn"),
-    preprocess: str = Form("resize"),
+    preprocess: str = Form("crop"),
     enhancer: str = Form("gfpgan"),
     still: bool = Form(True),
     expression_scale: float = Form(1.0),
@@ -592,7 +592,7 @@ async def agent_chat(
         "--driven_audio", f'"{audio_path}"',
         "--source_image", f'"{output_path}"',
         "--result_dir", f'"{run_dir}"',
-        "--preprocess", preprocess if preprocess in ["resize", "full", "extfull", "crop", "extcrop"] else "resize",
+        "--preprocess", preprocess if preprocess in ["crop", "extcrop", "full", "extfull", "resize"] else "crop",
         "--expression_scale", str(expression_scale),
         "--pose_style", str(pose_style)
     ]

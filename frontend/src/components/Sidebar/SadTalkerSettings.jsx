@@ -13,11 +13,11 @@ function SadTalkerSettings({
   const handleToggleFastMode = (enabled) => {
     setFastMode(enabled);
     if (enabled) {
-      setPreprocess("resize");
+      setPreprocess("crop");
       setEnhancer("none");
       setStill(true);
     } else {
-      setPreprocess("resize");
+      setPreprocess("crop");
       setEnhancer("gfpgan");
       setStill(false);
     }
@@ -99,9 +99,9 @@ function SadTalkerSettings({
               onChange={(e) => setPreprocess(e.target.value)}
               className="w-full bg-black/50 border border-secondary/40 rounded-lg p-1.5 text-xs text-on-surface outline-none"
             >
-              <option value="resize">Resize (Full frame portrait - No 1x1 crop)</option>
-              <option value="full">Full (Original high-resolution frame)</option>
-              <option value="crop">Crop (Square 1x1 face zoom)</option>
+              <option value="crop">Crop (Sharp 1:1 Face Zoom - Recommended)</option>
+              <option value="full">Full (Paste animated face onto full body)</option>
+              <option value="resize">Resize (Force full frame squish)</option>
             </select>
           </div>
 

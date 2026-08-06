@@ -17,7 +17,7 @@ function App() {
   const [persona, setPersona] = useState("");
   const [fastMode, setFastMode] = useState(true);
   const [lipsyncEngine, setLipsyncEngine] = useState("sadtalker");
-  const [preprocess, setPreprocess] = useState("resize");
+  const [preprocess, setPreprocess] = useState("crop");
   const [enhancer, setEnhancer] = useState("none");
   const [still, setStill] = useState(true);
   const [expressionScale, setExpressionScale] = useState(1.0);
