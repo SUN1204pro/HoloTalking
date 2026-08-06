@@ -4,10 +4,13 @@ function MainPlayer({
   selectedImage,
   isGenerating,
   generatedVideoUrl,
+  setGeneratedVideoUrl,
   isPlaying,
   setIsPlaying,
   togglePlay,
-  videoRef
+  videoRef,
+  idleVideoUrl,
+  isIdleGenerating
 }) {
   // Autoplay generated video when ready
   useEffect(() => {
@@ -33,20 +36,34 @@ function MainPlayer({
           }`}
           onPlay={() => setIsPlaying(true)}
           onPause={() => setIsPlaying(false)}
-          onEnded={() => setIsPlaying(false)}
+          onEnded={() => {
+            setIsPlaying(false);
+            if (setGeneratedVideoUrl) {
+              setGeneratedVideoUrl(null);
+            }
+          }}
         />
       )}
 
-      {/* 2. LIVE AVATAR STANDBY FEED (Display frozen image feed when not playing) */}
+      {/* 2. LIVE AVATAR STANDBY FEED (Display looping idle video or frozen image feed when not playing) */}
       {(!isPlaying || !generatedVideoUrl) && (
         <div className="absolute inset-0 flex items-center justify-center bg-neutral-950 overflow-hidden z-0">
-          {selectedImage ? (
+          {idleVideoUrl ? (
+            <video
+              src={idleVideoUrl}
+              autoPlay
+              loop
+              muted
+              playsInline
+              className="w-full h-full object-cover transition-opacity duration-1000 opacity-100"
+            />
+          ) : selectedImage ? (
             <div className="relative w-full h-full">
               <img 
                 src={selectedImage} 
                 alt="Live Avatar Standby" 
                 className={`w-full h-full object-cover transition-all duration-700 ${
-                  isGenerating ? 'scale-105 filter brightness-90 animate-pulse' : 'scale-100'
+                  isGenerating || isIdleGenerating ? 'scale-105 filter brightness-90 animate-pulse' : 'scale-100'
                 }`}
               />
               <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-black/20" />
@@ -73,6 +90,11 @@ function MainPlayer({
           <span className="px-3 py-1 rounded-full bg-amber-500/20 border border-amber-500/40 text-amber-400 font-mono text-[10px] flex items-center gap-1.5 backdrop-blur-md shadow-lg">
             <span className="w-2 h-2 rounded-full bg-amber-400 animate-pulse" />
             LISTENING & PROCESSING RESPONSE...
+          </span>
+        ) : isIdleGenerating ? (
+          <span className="px-3 py-1 rounded-full bg-blue-500/20 border border-blue-500/40 text-blue-400 font-mono text-[10px] flex items-center gap-1.5 backdrop-blur-md shadow-lg">
+            <span className="w-2 h-2 rounded-full bg-blue-500 animate-pulse" />
+            INITIALIZING LIVE AVATAR...
           </span>
         ) : selectedImage ? (
           <span className="px-3 py-1 rounded-full bg-red-500/20 border border-red-500/40 text-red-400 font-mono text-[10px] flex items-center gap-1.5 backdrop-blur-md shadow-lg">

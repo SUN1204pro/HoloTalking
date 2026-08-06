@@ -5,18 +5,19 @@ function SadTalkerSettings({
   enhancer, setEnhancer,
   still, setStill,
   expressionScale, setExpressionScale,
-  fastMode, setFastMode
+  fastMode, setFastMode,
+  lipsyncEngine, setLipsyncEngine
 }) {
   const [isOpen, setIsOpen] = useState(false);
 
   const handleToggleFastMode = (enabled) => {
     setFastMode(enabled);
     if (enabled) {
-      setPreprocess("crop");
+      setPreprocess("resize");
       setEnhancer("none");
       setStill(true);
     } else {
-      setPreprocess("crop");
+      setPreprocess("resize");
       setEnhancer("gfpgan");
       setStill(false);
     }
@@ -75,17 +76,32 @@ function SadTalkerSettings({
 
       {isOpen && (
         <div className="p-3 pt-1 border-t border-outline-variant/20 flex flex-col gap-2.5 text-xs">
+          {/* LIP-SYNC ENGINE */}
+          <div>
+            <label className="block text-[10px] text-outline mb-1 font-label">LIP-SYNC ENGINE</label>
+            <select
+              value={lipsyncEngine}
+              onChange={(e) => setLipsyncEngine(e.target.value)}
+              className="w-full bg-black/50 border border-amber-500/30 rounded-lg p-1.5 text-xs text-secondary font-medium outline-none"
+            >
+              <option value="sadtalker">SadTalker 3D (Native 3DMM Motion)</option>
+              <option value="wav2lip">Wav2Lip + SadTalker Head Motion (Overlay Sync)</option>
+            </select>
+          </div>
+
           {/* Preprocess */}
           <div>
-            <label className="block text-[10px] text-outline mb-1 font-label">PREPROCESS</label>
+            <label className="block text-[10px] text-outline mb-1 font-label font-bold text-secondary">
+              PREPROCESS MODE
+            </label>
             <select
               value={preprocess}
               onChange={(e) => setPreprocess(e.target.value)}
-              className="w-full bg-black/50 border border-outline-variant/40 rounded-lg p-1.5 text-xs text-on-surface outline-none"
+              className="w-full bg-black/50 border border-secondary/40 rounded-lg p-1.5 text-xs text-on-surface outline-none"
             >
-              <option value="crop">Crop (Fast, standard face zoom)</option>
-              <option value="resize">Resize (Keep full frame shape)</option>
-              <option value="full">Full (Full portrait resolution)</option>
+              <option value="resize">Resize (Full frame portrait - No 1x1 crop)</option>
+              <option value="full">Full (Original high-resolution frame)</option>
+              <option value="crop">Crop (Square 1x1 face zoom)</option>
             </select>
           </div>
 

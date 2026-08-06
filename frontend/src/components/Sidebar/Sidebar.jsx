@@ -5,11 +5,12 @@ import InputArea from "./InputArea";
 import SadTalkerSettings from "./SadTalkerSettings";
 
 function Sidebar({
-  selectedImage, setSelectedImage, handleImageUpload, activeTab, setActiveTab,
+  selectedImage, setSelectedImage, handleImageUpload, onSelectCharacter, activeTab, setActiveTab,
   scriptText, setScriptText, audioFile, setAudioFile,
   selectedVoice, setSelectedVoice, useGemini, setUseGemini, persona, setPersona,
   preprocess, setPreprocess, enhancer, setEnhancer, still, setStill,
   expressionScale, setExpressionScale, fastMode, setFastMode,
+  lipsyncEngine, setLipsyncEngine,
   isGenerateReady, isGenerating, handleGenerate, errorMessage
 }) {
   return (
@@ -27,7 +28,7 @@ function Sidebar({
           </div>
 
           <UploadArea selectedImage={selectedImage} handleImageUpload={handleImageUpload} />
-          <CharacterList selectedImage={selectedImage} setSelectedImage={setSelectedImage} />
+          <CharacterList selectedImage={selectedImage} onSelectCharacter={onSelectCharacter} />
           <InputArea
             activeTab={activeTab} setActiveTab={setActiveTab}
             scriptText={scriptText} setScriptText={setScriptText}
@@ -43,6 +44,7 @@ function Sidebar({
             still={still} setStill={setStill}
             expressionScale={expressionScale} setExpressionScale={setExpressionScale}
             fastMode={fastMode} setFastMode={setFastMode}
+            lipsyncEngine={lipsyncEngine} setLipsyncEngine={setLipsyncEngine}
           />
         </div>
 

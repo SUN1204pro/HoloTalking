@@ -111,46 +111,15 @@ function InputArea({
             </select>
           </div>
 
-          {/* Gemini AI Agent Toggle */}
-          <div className="p-3 bg-black/30 border border-outline-variant/40 rounded-xl">
-            <div className="flex items-center justify-between">
-              <label htmlFor="gemini-toggle" className="flex items-center gap-2 text-xs font-label text-secondary cursor-pointer bronze-glow">
-                <span>✨ Gemini AI Agent Response</span>
-              </label>
-              <input
-                id="gemini-toggle"
-                type="checkbox"
-                checked={useGemini}
-                onChange={(e) => setUseGemini(e.target.checked)}
-                className="w-4 h-4 accent-amber-400 cursor-pointer"
-              />
-            </div>
-            {useGemini && (
-              <div className="mt-2.5 flex flex-col gap-2">
-                <input
-                  type="text"
-                  value={persona}
-                  onChange={(e) => setPersona(e.target.value)}
-                  placeholder="Character Persona (e.g. Vua Lý Thái Tổ...)"
-                  className="w-full text-xs bg-black/60 rounded-lg border border-outline-variant/50 p-2 outline-none focus:border-secondary text-on-surface placeholder:text-outline/70"
-                />
-              </div>
-            )}
-          </div>
-
           {/* Text script area */}
           <div>
             <label className="block font-label text-[10px] text-outline mb-1">
-              {useGemini ? "GEMINI AI PROMPT / QUESTION" : "TEXT SCRIPT TO SPEAK"}
+              TEXT SCRIPT TO SPEAK
             </label>
             <textarea
               value={scriptText}
               onChange={(e) => setScriptText(e.target.value)}
-              placeholder={
-                useGemini
-                  ? "Enter a prompt for Gemini AI to answer (e.g. Hãy tự giới thiệu về công ơn khai quốc của bạn...)"
-                  : "Enter the exact text script for the historical character to speak..."
-              }
+              placeholder="Enter the exact text script for the historical character to speak..."
               className="w-full min-h-[90px] text-xs bg-black/40 rounded-xl border border-outline-variant/60 p-3 outline-none focus:border-secondary resize-none transition-colors custom-scrollbar"
             />
           </div>
@@ -160,6 +129,24 @@ function InputArea({
       {/* LIVE MIC TAB */}
       {activeTab === "LIVE_MIC" && (
         <div className="flex flex-col gap-3">
+          {/* Vietneu Voice Selector */}
+          <div>
+            <label className="block font-label text-[10px] text-outline mb-1">
+              VIETNEU TTS VOICE
+            </label>
+            <select
+              value={selectedVoice}
+              onChange={(e) => setSelectedVoice(e.target.value)}
+              className="w-full text-xs bg-black/40 text-on-surface rounded-xl border border-outline-variant/60 p-2.5 outline-none focus:border-secondary transition-colors"
+            >
+              {VIETNEU_VOICES.map((v) => (
+                <option key={v.id} value={v.id} className="bg-neutral-900 text-white">
+                  🎙️ {v.name}
+                </option>
+              ))}
+            </select>
+          </div>
+
           {/* Gemini AI Agent Toggle for Live Mic */}
           <div className="p-3 bg-black/30 border border-outline-variant/40 rounded-xl">
             <div className="flex items-center justify-between">

@@ -1,8 +1,24 @@
 export const recentCharacters = [
-  "https://i.pinimg.com/736x/6d/d1/4f/6dd14ff932661cf178a1cb882adcc62c.jpg",
-  "https://i.pinimg.com/1200x/f1/5b/9f/f15b9fe15a3143a728eefb1e944feaee.jpg",
-  "https://i.pinimg.com/736x/d9/5c/2f/d95c2fb8f529ff7499c31ba735877bbb.jpg",
-  "https://i.pinimg.com/736x/4f/c1/a5/4fc1a55aa8704427127f8d1da89c5477.jpg"
+  {
+    name: "Trần Hưng Đạo",
+    filename: "thd.png",
+    url: "http://127.0.0.1:8000/examples/source_image/thd.png"
+  },
+  {
+    name: "Vua Hùng",
+    filename: "vuahung.png",
+    url: "http://127.0.0.1:8000/examples/source_image/vuahung.png"
+  },
+  {
+    name: "Art 0",
+    filename: "art_0.png",
+    url: "http://127.0.0.1:8000/examples/source_image/art_0.png"
+  },
+  {
+    name: "Art 1",
+    filename: "art_1.png",
+    url: "http://127.0.0.1:8000/examples/source_image/art_1.png"
+  }
 ];
 
 export const recentGenerations = [

@@ -3,7 +3,7 @@ import RecentVideos from "./RecentVideos";
 
 function VideoArea({
   selectedImage, isGenerating, generatedVideoUrl, setGeneratedVideoUrl, isPlaying,
-  setIsPlaying, togglePlay, handleDownload, videoRef, spokenText
+  setIsPlaying, togglePlay, handleDownload, videoRef, spokenText, idleVideoUrl, isIdleGenerating
 }) {
   return (
     <section className="flex-1 flex flex-col justify-center pl-4 lg:pl-10">
@@ -29,10 +29,13 @@ function VideoArea({
           selectedImage={selectedImage}
           isGenerating={isGenerating}
           generatedVideoUrl={generatedVideoUrl} 
+          setGeneratedVideoUrl={setGeneratedVideoUrl}
           isPlaying={isPlaying}
+          setIsPlaying={setIsPlaying}
           togglePlay={togglePlay} 
           videoRef={videoRef}
-          setIsPlaying={setIsPlaying} 
+          idleVideoUrl={idleVideoUrl}
+          isIdleGenerating={isIdleGenerating}
         />
 
         {/* Gemini AI Spoken Transcript Box */}

@@ -18,8 +18,12 @@ ENV/
 backend/SadTalker/checkpoints/
 backend/SadTalker/gfpgan/
 backend/SadTalker/results/
+backend/SadTalker/result/
 backend/SadTalker/temp_files/
 backend/SadTalker/venv/
+result/
+backend/*_rembg.png
+backend/*.raw.png
 *.pth
 *.pt
 *.tar.gz
