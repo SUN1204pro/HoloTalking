@@ -184,49 +184,11 @@ async def preprocess_avatar(
     output_path = os.path.join(run_dir, output_filename)
     
     output_path = remove_image_background(image_path, output_path)
-    
-    # 2. Generate silent idle SadTalker video automatically
-    idle_video_url = None
-    try:
-        silent_audio_path = os.path.join(run_dir, "silent_idle.wav")
-        generate_silent_wav(silent_audio_path, duration_sec=1.5)
-
-        python_exe = sys.executable
-        cmd_parts = [
-            f'"{python_exe}"', "inference.py",
-            "--driven_audio", f'"{silent_audio_path}"',
-            "--source_image", f'"{output_path}"',
-            "--result_dir", f'"{run_dir}"',
-            "--preprocess", "crop",
-            "--still"
-        ]
-        cmd_str = " ".join(cmd_parts)
-        process = await asyncio.create_subprocess_shell(cmd_str)
-        await process.communicate()
-
-        list_of_videos = glob.glob(f'{run_dir}/**/*.mp4', recursive=True)
-        if list_of_videos:
-            newest_idle_video = max(list_of_videos, key=os.path.getctime)
-            final_idle_name = "idle_avatar.mp4"
-            final_idle_path = os.path.join(run_dir, final_idle_name)
-            shutil.move(newest_idle_video, final_idle_path)
-
-            os.makedirs("result", exist_ok=True)
-            os.makedirs("../../result", exist_ok=True)
-            shutil.copy(final_idle_path, os.path.join("result", f"idle_{timestamp}.mp4"))
-            shutil.copy(final_idle_path, "../../result/latest_idle_result.mp4")
-            shutil.copy(final_idle_path, "../../result/latest_result.mp4")
-
-            idle_video_url = f"http://127.0.0.1:8000/static/preprocess_{timestamp}/{final_idle_name}"
-            print(f"[preprocess_avatar] Idle video successfully generated -> {final_idle_path}")
-    except Exception as e:
-        print(f"[preprocess_avatar] Idle video generation notice: {e}")
         
     return {
         "status": "success",
         "processed_image_url": f"http://127.0.0.1:8000/static/preprocess_{timestamp}/{os.path.basename(output_path)}",
-        "processed_image_path": output_path,
-        "idle_video_url": idle_video_url
+        "processed_image_path": output_path
     }
 
 

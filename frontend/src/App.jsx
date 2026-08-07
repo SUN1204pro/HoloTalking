@@ -63,7 +63,7 @@ function App() {
   const processAvatarAndGenerateIdle = async (file, originalImageUrl, presetFileName = null) => {
     setIsIdleGenerating(true);
     try {
-      // 1. Preprocess (Remove background & generate idle video in backend)
+      // Preprocess (Remove background)
       const preprocessFormData = new FormData();
       if (file) {
         preprocessFormData.append("image", file);
@@ -79,27 +79,23 @@ function App() {
           preprocessFormData.append("preset_avatar", originalImageUrl.split("/").pop());
         }
       }
-
+      
       const preprocessRes = await fetch("http://127.0.0.1:8000/preprocess_avatar", {
         method: "POST",
         body: preprocessFormData,
       });
-
+      
       if (!preprocessRes.ok) {
         throw new Error("Failed to preprocess avatar");
       }
-
+      
       const preprocessData = await preprocessRes.json();
       const cleanImageUrl = preprocessData.processed_image_url;
       setBgRemovedImageUrl(cleanImageUrl);
       setSelectedImage(cleanImageUrl);
-
-      if (preprocessData.idle_video_url) {
-        const timestamp = new Date().getTime();
-        setIdleVideoUrl(`${preprocessData.idle_video_url}?t=${timestamp}`);
-      }
+      setIdleVideoUrl(null);
     } catch (error) {
-      console.error("Idle Generation Error:", error);
+      console.error("Avatar Preprocess Error:", error);
     } finally {
       setIsIdleGenerating(false);
     }
