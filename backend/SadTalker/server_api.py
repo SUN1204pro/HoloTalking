@@ -197,7 +197,7 @@ async def preprocess_avatar(
             "--driven_audio", f'"{silent_audio_path}"',
             "--source_image", f'"{output_path}"',
             "--result_dir", f'"{run_dir}"',
-            "--preprocess", "resize",
+            "--preprocess", "crop",
             "--still"
         ]
         cmd_str = " ".join(cmd_parts)

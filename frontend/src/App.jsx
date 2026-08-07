@@ -46,7 +46,7 @@ function App() {
     setSelectedImage(imageUrl);
     setBgRemovedImageUrl(null);
     setIdleVideoUrl(null);
-    
+
     processAvatarAndGenerateIdle(file, imageUrl);
   };
 
@@ -55,7 +55,7 @@ function App() {
     setPortraitFile(null);
     setBgRemovedImageUrl(null);
     setIdleVideoUrl(null);
-    
+
     const presetName = typeof charObj === "object" ? charObj.filename || charObj.id : imgSrc.split("/").pop();
     processAvatarAndGenerateIdle(null, imgSrc, presetName);
   };
@@ -79,21 +79,21 @@ function App() {
           preprocessFormData.append("preset_avatar", originalImageUrl.split("/").pop());
         }
       }
-      
+
       const preprocessRes = await fetch("http://127.0.0.1:8000/preprocess_avatar", {
         method: "POST",
         body: preprocessFormData,
       });
-      
+
       if (!preprocessRes.ok) {
         throw new Error("Failed to preprocess avatar");
       }
-      
+
       const preprocessData = await preprocessRes.json();
       const cleanImageUrl = preprocessData.processed_image_url;
       setBgRemovedImageUrl(cleanImageUrl);
       setSelectedImage(cleanImageUrl);
-      
+
       if (preprocessData.idle_video_url) {
         const timestamp = new Date().getTime();
         setIdleVideoUrl(`${preprocessData.idle_video_url}?t=${timestamp}`);
@@ -214,8 +214,8 @@ function App() {
         typeof error === "string"
           ? error
           : error?.message && typeof error.message === "string"
-          ? error.message
-          : JSON.stringify(error);
+            ? error.message
+            : JSON.stringify(error);
       setErrorMessage(displayMsg || "Failed to connect to backend server.");
     } finally {
       setIsGenerating(false);
@@ -248,7 +248,7 @@ function App() {
       <div className="film-grain"></div>
 
       <main className="relative z-10 flex min-h-screen max-w-[1440px] mx-auto px-10 py-12 gap-12 items-start">
-        <Sidebar 
+        <Sidebar
           selectedImage={selectedImage}
           setSelectedImage={setSelectedImage}
           handleImageUpload={handleImageUpload}
@@ -283,7 +283,7 @@ function App() {
           errorMessage={errorMessage}
         />
 
-        <VideoArea 
+        <VideoArea
           selectedImage={selectedImage}
           isGenerating={isGenerating}
           generatedVideoUrl={generatedVideoUrl}
