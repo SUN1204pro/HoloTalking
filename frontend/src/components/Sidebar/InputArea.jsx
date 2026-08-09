@@ -2,12 +2,16 @@ import { useState, useRef, useEffect } from "react";
 import TabGroup from "../common/TabGroup";
 
 const VIETNEU_VOICES = [
-  { id: "Thái Sơn", name: "Thái Sơn (Bắc - Trầm ấm)", region: "Miền Bắc" },
-  { id: "Ngọc Huyền", name: "Ngọc Huyền (Bắc - Dịu dàng)", region: "Miền Bắc" },
-  { id: "Nam Phương", name: "Nam Phương (Nam - Hào sảng)", region: "Miền Nam" },
-  { id: "Minh Hoàng", name: "Minh Hoàng (Trung - Điềm tĩnh)", region: "Miền Trung" },
-  { id: "Bảo Quốc", name: "Bảo Quốc (Bắc - Uy nghi Lịch sử)", region: "Miền Bắc" },
-  { id: "Kim Ngân", name: "Kim Ngân (Nam - Ngọt ngào)", region: "Miền Nam" },
+  { id: "Thái Sơn", name: "Thái Sơn (Nam - Bắc trầm ấm, dõng dạc)" },
+  { id: "Gia Bảo", name: "Gia Bảo (Nam - Nam Bộ truyền cảm)" },
+  { id: "Đức Trí", name: "Đức Trí (Nam - Bắc uy nghi, truyền cảm)" },
+  { id: "Ngọc Lan", name: "Ngọc Lan (Nữ - Bắc dịu dàng, trong trẻo)" },
+  { id: "Mỹ Duyên", name: "Mỹ Duyên (Nữ - Nam Bộ ngọt ngào)" },
+  { id: "Trúc Ly", name: "Trúc Ly (Nữ - Miền Trung điềm tĩnh)" },
+  { id: "Xuân Vĩnh", name: "Xuân Vĩnh (Nam - Bắc rõ ràng, hùng hồn)" },
+  { id: "Trọng Hữu", name: "Trọng Hữu (Nam - Nam Bộ nồng ấm)" },
+  { id: "Bình An", name: "Bình An (Nam - Miền Trung mộc mạc)" },
+  { id: "Ngọc Linh", name: "Ngọc Linh (Nữ - Bắc truyền cảm)" },
 ];
 
 function InputArea({
@@ -15,6 +19,25 @@ function InputArea({
   selectedVoice, setSelectedVoice, useGemini, setUseGemini, persona, setPersona,
   handleGenerate
 }) {
+  const [voices, setVoices] = useState(VIETNEU_VOICES);
+
+  // Fetch dynamic voices from backend if available
+  useEffect(() => {
+    fetch("http://127.0.0.1:8000/api/voices")
+      .then((res) => res.json())
+      .then((data) => {
+        if (Array.isArray(data) && data.length > 0) {
+          setVoices(
+            data.map((v) => ({
+              id: v.id,
+              name: `${v.name} (${v.gender || ''} - ${v.region || ''} ${v.desc ? '- ' + v.desc : ''})`.trim()
+            }))
+          );
+        }
+      })
+      .catch(() => {});
+  }, []);
+
   // Live Microphone Recording states
   const [isRecording, setIsRecording] = useState(false);
   const [recordTimer, setRecordTimer] = useState(0);
@@ -103,7 +126,7 @@ function InputArea({
               onChange={(e) => setSelectedVoice(e.target.value)}
               className="w-full text-xs bg-black/40 text-on-surface rounded-xl border border-outline-variant/60 p-2.5 outline-none focus:border-secondary transition-colors"
             >
-              {VIETNEU_VOICES.map((v) => (
+              {voices.map((v) => (
                 <option key={v.id} value={v.id} className="bg-neutral-900 text-white">
                   🎙️ {v.name}
                 </option>
@@ -139,7 +162,7 @@ function InputArea({
               onChange={(e) => setSelectedVoice(e.target.value)}
               className="w-full text-xs bg-black/40 text-on-surface rounded-xl border border-outline-variant/60 p-2.5 outline-none focus:border-secondary transition-colors"
             >
-              {VIETNEU_VOICES.map((v) => (
+              {voices.map((v) => (
                 <option key={v.id} value={v.id} className="bg-neutral-900 text-white">
                   🎙️ {v.name}
                 </option>

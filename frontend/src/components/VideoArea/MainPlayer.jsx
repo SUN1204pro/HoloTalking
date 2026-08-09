@@ -31,22 +31,17 @@ function MainPlayer({
         <video 
           ref={videoRef}
           src={generatedVideoUrl} 
-          className={`w-full h-full object-cover transition-opacity duration-500 ${
-            isPlaying ? 'opacity-100 z-10 relative' : 'opacity-0 absolute inset-0 z-0'
-          }`}
+          className="w-full h-full object-contain z-10 relative"
           onPlay={() => setIsPlaying(true)}
           onPause={() => setIsPlaying(false)}
           onEnded={() => {
             setIsPlaying(false);
-            if (setGeneratedVideoUrl) {
-              setGeneratedVideoUrl(null);
-            }
           }}
         />
       )}
 
-      {/* 2. LIVE AVATAR STANDBY FEED (Display looping idle video or frozen image feed when not playing) */}
-      {(!isPlaying || !generatedVideoUrl) && (
+      {/* 2. LIVE AVATAR STANDBY FEED (Display looping idle video or frozen image feed when no talking video) */}
+      {!generatedVideoUrl && (
         <div className="absolute inset-0 flex items-center justify-center bg-neutral-950 overflow-hidden z-0">
           {idleVideoUrl ? (
             <video
@@ -55,14 +50,14 @@ function MainPlayer({
               loop
               muted
               playsInline
-              className="w-full h-full object-cover transition-opacity duration-1000 opacity-100"
+              className="w-full h-full object-contain transition-opacity duration-1000 opacity-100"
             />
           ) : selectedImage ? (
-            <div className="relative w-full h-full">
+            <div className="relative w-full h-full flex items-center justify-center">
               <img 
                 src={selectedImage} 
                 alt="Live Avatar Standby" 
-                className={`w-full h-full object-cover transition-all duration-700 ${
+                className={`w-full h-full object-contain transition-all duration-700 ${
                   isGenerating || isIdleGenerating ? 'scale-105 filter brightness-90 animate-pulse' : 'scale-100'
                 }`}
               />
@@ -95,6 +90,11 @@ function MainPlayer({
           <span className="px-3 py-1 rounded-full bg-blue-500/20 border border-blue-500/40 text-blue-400 font-mono text-[10px] flex items-center gap-1.5 backdrop-blur-md shadow-lg">
             <span className="w-2 h-2 rounded-full bg-blue-500 animate-pulse" />
             INITIALIZING LIVE AVATAR...
+          </span>
+        ) : generatedVideoUrl ? (
+          <span className="px-3 py-1 rounded-full bg-emerald-500/20 border border-emerald-500/40 text-emerald-300 font-mono text-[10px] flex items-center gap-1.5 backdrop-blur-md shadow-lg">
+            <span className="w-2 h-2 rounded-full bg-emerald-400" />
+            FULL AVATAR - DONE SPEAKING
           </span>
         ) : selectedImage ? (
           <span className="px-3 py-1 rounded-full bg-red-500/20 border border-red-500/40 text-red-400 font-mono text-[10px] flex items-center gap-1.5 backdrop-blur-md shadow-lg">

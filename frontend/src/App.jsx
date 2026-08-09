@@ -17,7 +17,7 @@ function App() {
   const [persona, setPersona] = useState("");
   const [fastMode, setFastMode] = useState(true);
   const [lipsyncEngine, setLipsyncEngine] = useState("sadtalker");
-  const [preprocess, setPreprocess] = useState("crop");
+  const [preprocess, setPreprocess] = useState("full");
   const [enhancer, setEnhancer] = useState("none");
   const [still, setStill] = useState(true);
   const [expressionScale, setExpressionScale] = useState(1.0);
@@ -46,6 +46,7 @@ function App() {
     setSelectedImage(imageUrl);
     setBgRemovedImageUrl(null);
     setIdleVideoUrl(null);
+    setGeneratedVideoUrl(null);
 
     processAvatarAndGenerateIdle(file, imageUrl);
   };
@@ -55,6 +56,7 @@ function App() {
     setPortraitFile(null);
     setBgRemovedImageUrl(null);
     setIdleVideoUrl(null);
+    setGeneratedVideoUrl(null);
 
     const presetName = typeof charObj === "object" ? charObj.filename || charObj.id : imgSrc.split("/").pop();
     processAvatarAndGenerateIdle(null, imgSrc, presetName);

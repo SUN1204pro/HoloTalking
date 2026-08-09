@@ -4,6 +4,8 @@ import shutil
 import asyncio
 import glob
 import time
+import socket
+import struct
 from datetime import datetime
 from fastapi import FastAPI, UploadFile, File, Form, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -78,6 +80,56 @@ def remove_image_background(input_path: str, output_path: str) -> str:
     img = Image.open(input_path)
     img.convert("RGB").save(output_path, "PNG")
     return output_path
+
+
+def crop_to_1x1_square(input_path: str, output_path: str, target_size: int = 512) -> str:
+    """Crops image to a 1:1 square centered around detected face or image center."""
+    try:
+        import cv2
+        img = Image.open(input_path)
+        img_cv = cv2.imread(input_path)
+        if img_cv is not None:
+            gray = cv2.cvtColor(img_cv, cv2.COLOR_BGR2GRAY)
+            face_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_frontalface_default.xml')
+            faces = face_cascade.detectMultiScale(gray, scaleFactor=1.1, minNeighbors=5, minSize=(30, 30))
+            if len(faces) > 0:
+                x, y, w, h = max(faces, key=lambda f: f[2] * f[3])
+                center_x, center_y = x + w // 2, y + h // 2
+                crop_size = int(max(w, h) * 2.2)
+                img_h, img_w = img_cv.shape[:2]
+                crop_size = min(crop_size, img_h, img_w)
+                
+                left = max(0, center_x - crop_size // 2)
+                top = max(0, center_y - crop_size // 2)
+                right = min(img_w, left + crop_size)
+                bottom = min(img_h, top + crop_size)
+                
+                box_side = min(right - left, bottom - top)
+                right = left + box_side
+                bottom = top + box_side
+                
+                img_cropped = img.crop((left, top, right, bottom))
+                img_resized = img_cropped.resize((target_size, target_size), Image.Resampling.LANCZOS)
+                img_resized.save(output_path)
+                print(f"[1x1 Crop] Face-centered 1:1 crop successful -> {output_path}")
+                return output_path
+    except Exception as e:
+        print(f"[1x1 Crop] Face detection failed ({e}), falling back to center 1:1 crop")
+
+    try:
+        img = Image.open(input_path)
+        w, h = img.size
+        min_dim = min(w, h)
+        left = (w - min_dim) // 2
+        top = (h - min_dim) // 2
+        img_cropped = img.crop((left, top, left + min_dim, top + min_dim))
+        img_resized = img_cropped.resize((target_size, target_size), Image.Resampling.LANCZOS)
+        img_resized.save(output_path)
+        print(f"[1x1 Crop] Center 1:1 crop saved -> {output_path}")
+        return output_path
+    except Exception as err:
+        print(f"[1x1 Crop] Fallback error: {err}")
+        return input_path
 
 
 try:
@@ -593,6 +645,78 @@ async def agent_chat(
     }
 
 
+@app.post("/api/push_video")
+async def push_video_to_client(
+    target_ip: str = Form("192.168.1.98"),
+    port: int = Form(9999)
+):
+    """
+    Sends the latest generated MP4 video directly to the specified target socket IP:port 
+    (or broadcasts to socket_video_server connected clients if target_ip is empty).
+    """
+    target_video = "../../result/latest_result.mp4"
+    if not os.path.exists(target_video):
+        target_video = os.path.join("result", "latest_result.mp4")
+    
+    if not os.path.exists(target_video):
+        videos = glob.glob("result/*.mp4") + glob.glob("../../result/*.mp4")
+        if videos:
+            target_video = max(videos, key=os.path.getctime)
+        else:
+            raise HTTPException(status_code=404, detail="No video file found to send.")
+
+    file_size = os.path.getsize(target_video)
+    
+    # 1. Send directly via TCP socket to target_ip:port if specified
+    if target_ip and target_ip.strip():
+        clean_ip = target_ip.strip()
+        try:
+            s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            s.settimeout(6.0)
+            s.connect((clean_ip, port))
+            
+            # Send 8-byte header
+            header = struct.pack("!Q", file_size)
+            s.sendall(header)
+            
+            bytes_sent = 0
+            with open(target_video, "rb") as f:
+                while True:
+                    chunk = f.read(64144)
+                    if not chunk:
+                        break
+                    s.sendall(chunk)
+                    bytes_sent += len(chunk)
+            s.close()
+            
+            return {
+                "status": "success",
+                "message": f"Successfully sent video ({round(file_size/(1024*1024), 2)} MB) to {clean_ip}:{port}",
+                "target_ip": clean_ip,
+                "port": port,
+                "bytes_sent": bytes_sent
+            }
+        except Exception as e:
+            print(f"Direct socket send to {clean_ip}:{port} failed: {e}. Trying fallback broadcast...")
+
+    # 2. Fallback: Broadcast to socket_video_server connected active clients
+    try:
+        backend_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        if backend_dir not in sys.path:
+            sys.path.append(backend_dir)
+        import socket_video_server
+        socket_video_server.broadcast_video_update(target_video)
+        return {
+            "status": "success",
+            "message": f"Broadcasted video ({round(file_size/(1024*1024), 2)} MB) to active socket clients.",
+            "file_size": file_size
+        }
+    except Exception as err:
+        raise HTTPException(status_code=500, detail=f"Failed to send video over socket: {str(err)}")
+
+
+
+
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run("server_api:app", host="127.0.0.1", port=8000, reload=True)
+    uvicorn.run("server_api:app", host="0.0.0.0", port=8000, reload=True)

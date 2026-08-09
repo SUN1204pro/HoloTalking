@@ -13,11 +13,11 @@ function SadTalkerSettings({
   const handleToggleFastMode = (enabled) => {
     setFastMode(enabled);
     if (enabled) {
-      setPreprocess("crop");
+      setPreprocess("full");
       setEnhancer("none");
       setStill(true);
     } else {
-      setPreprocess("crop");
+      setPreprocess("full");
       setEnhancer("gfpgan");
       setStill(false);
     }
