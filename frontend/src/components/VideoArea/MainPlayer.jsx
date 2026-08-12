@@ -31,12 +31,12 @@ function MainPlayer({
         <video 
           ref={videoRef}
           src={generatedVideoUrl} 
+          autoPlay
+          loop
+          playsInline
           className="w-full h-full object-contain z-10 relative"
           onPlay={() => setIsPlaying(true)}
           onPause={() => setIsPlaying(false)}
-          onEnded={() => {
-            setIsPlaying(false);
-          }}
         />
       )}
 
@@ -91,11 +91,6 @@ function MainPlayer({
             <span className="w-2 h-2 rounded-full bg-blue-500 animate-pulse" />
             INITIALIZING LIVE AVATAR...
           </span>
-        ) : generatedVideoUrl ? (
-          <span className="px-3 py-1 rounded-full bg-emerald-500/20 border border-emerald-500/40 text-emerald-300 font-mono text-[10px] flex items-center gap-1.5 backdrop-blur-md shadow-lg">
-            <span className="w-2 h-2 rounded-full bg-emerald-400" />
-            FULL AVATAR - DONE SPEAKING
-          </span>
         ) : selectedImage ? (
           <span className="px-3 py-1 rounded-full bg-red-500/20 border border-red-500/40 text-red-400 font-mono text-[10px] flex items-center gap-1.5 backdrop-blur-md shadow-lg">
             <span className="w-2 h-2 rounded-full bg-red-500 animate-pulse" />
@@ -111,22 +106,6 @@ function MainPlayer({
           <p className="text-secondary font-label tracking-widest text-xs animate-pulse uppercase">
             Synthesizing Talking Avatar...
           </p>
-        </div>
-      )}
-
-      {/* 5. PLAY / REPLAY CONTROLS */}
-      {generatedVideoUrl && !isGenerating && (
-        <div 
-          className={`absolute inset-0 z-20 flex items-center justify-center transition-all duration-300 ${
-            isPlaying ? 'bg-black/0 opacity-0 hover:opacity-100' : 'bg-black/30 opacity-100'
-          }`}
-          onClick={togglePlay}
-        >
-          <button className="w-16 h-16 rounded-full border border-secondary/50 bg-secondary/10 backdrop-blur-md flex items-center justify-center hover:scale-110 hover:bg-secondary/20 transition-all group cursor-pointer shadow-2xl">
-            <span className="material-symbols-outlined text-secondary text-3xl group-hover:text-white transition-colors">
-              {isPlaying ? 'pause' : 'play_arrow'}
-            </span>
-          </button>
         </div>
       )}
 

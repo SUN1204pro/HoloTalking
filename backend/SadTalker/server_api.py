@@ -6,6 +6,8 @@ import glob
 import time
 import socket
 import struct
+import threading
+import subprocess
 from datetime import datetime
 from fastapi import FastAPI, UploadFile, File, Form, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -158,6 +160,80 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Holofan TCP streamer: start the listener once, in-process, so a new client
+# connecting to it sees the same active_clients list that /generate pushes to.
+_backend_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if _backend_dir not in sys.path:
+    sys.path.append(_backend_dir)
+import socket_video_server
+socket_video_server.start_server_background()
+
+# --- Continuous holofan push-stream state -----------------------------------
+# While a stream is "active", a background thread keeps pushing content to the
+# target device forever (until stopped): the freeze-frame clip while SadTalker
+# is busy generating (or before any talking clip exists), otherwise the latest
+# generated talking clip.
+FREEZE_VIDEO_PATH = os.path.join("..", "..", "result", "freeze_frame.mp4")
+LATEST_RESULT_PATH = "../../result/latest_result.mp4"
+_last_avatar_image_path = None
+_is_generating = False
+_stream_lock = threading.Lock()
+_stream_state = {"active": False, "target_ip": None, "port": None}
+
+
+def _build_freeze_video(image_path: str, duration: float = 3.0):
+    """Encode the current avatar image into a short MP4 so the holofan link can
+    push a frozen frame while SadTalker is generating a new talking clip."""
+    if not image_path or not os.path.exists(image_path):
+        return
+    try:
+        os.makedirs(os.path.dirname(FREEZE_VIDEO_PATH), exist_ok=True)
+        cmd = (
+            f'ffmpeg -y -hide_banner -loglevel error -loop 1 -i "{image_path}" '
+            f'-t {duration} -vf "format=yuv420p" -c:v libx264 -movflags +faststart "{FREEZE_VIDEO_PATH}"'
+        )
+        subprocess.run(cmd, shell=True, check=True)
+    except Exception as e:
+        print(f"[freeze video] Failed to build freeze clip: {e}")
+
+
+def _direct_send_file(file_path: str, ip: str, port: int, timeout: float = 6.0) -> bool:
+    if not os.path.exists(file_path) or os.path.getsize(file_path) == 0:
+        return False
+    file_size = os.path.getsize(file_path)
+    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    s.settimeout(timeout)
+    try:
+        s.connect((ip, port))
+        s.sendall(struct.pack("!Q", file_size))
+        with open(file_path, "rb") as f:
+            while True:
+                chunk = f.read(64144)
+                if not chunk:
+                    break
+                s.sendall(chunk)
+        return True
+    finally:
+        s.close()
+
+
+def _push_stream_loop(interval_seconds: float):
+    """Runs while _stream_state['active'] is True: forever pushes either the
+    freeze frame (while SadTalker is generating, or no talking clip exists yet)
+    or the latest talking clip to the configured target, until stopped."""
+    while True:
+        with _stream_lock:
+            if not _stream_state["active"]:
+                return
+            ip = _stream_state["target_ip"]
+            port = _stream_state["port"]
+        video_to_send = FREEZE_VIDEO_PATH if (_is_generating or not os.path.exists(LATEST_RESULT_PATH)) else LATEST_RESULT_PATH
+        try:
+            _direct_send_file(video_to_send, ip, port)
+        except Exception as e:
+            print(f"[stream loop] Push to {ip}:{port} failed: {e}")
+        time.sleep(interval_seconds)
+
 
 @app.get("/")
 def root():
@@ -236,7 +312,11 @@ async def preprocess_avatar(
     output_path = os.path.join(run_dir, output_filename)
     
     output_path = remove_image_background(image_path, output_path)
-        
+
+    global _last_avatar_image_path
+    _last_avatar_image_path = output_path
+    _build_freeze_video(output_path)
+
     return {
         "status": "success",
         "processed_image_url": f"http://127.0.0.1:8000/static/preprocess_{timestamp}/{os.path.basename(output_path)}",
@@ -366,6 +446,10 @@ async def generate_video(
     else:
         output_path = remove_image_background(image_path, output_path)
 
+    global _last_avatar_image_path
+    _last_avatar_image_path = output_path
+    _build_freeze_video(output_path)
+
     # 3. Construct SadTalker inference command using active Python executable
     python_exe = sys.executable
     cmd_parts = [
@@ -414,6 +498,14 @@ async def generate_video(
     result_copy_path = os.path.join("result", f"result_{timestamp}.mp4")
     shutil.copy(final_video_path, result_copy_path)
     shutil.copy(final_video_path, "../../result/latest_result.mp4")
+
+    # Auto-push the freshly generated clip to any connected holofan client(s),
+    # without blocking the HTTP response on the broadcast itself.
+    threading.Thread(
+        target=socket_video_server.broadcast_video_update,
+        args=("../../result/latest_result.mp4",),
+        daemon=True
+    ).start()
 
     return {
         "status": "success",
@@ -699,16 +791,17 @@ async def push_video_to_client(
         except Exception as e:
             print(f"Direct socket send to {clean_ip}:{port} failed: {e}. Trying fallback broadcast...")
 
-    # 2. Fallback: Broadcast to socket_video_server connected active clients
+    # 2. Fallback: Broadcast to the already-running holofan listener's connected clients.
+    if not socket_video_server.active_clients:
+        raise HTTPException(
+            status_code=404,
+            detail="No holofan clients connected to the socket streamer (port 9999) and direct send failed/unset."
+        )
     try:
-        backend_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-        if backend_dir not in sys.path:
-            sys.path.append(backend_dir)
-        import socket_video_server
         socket_video_server.broadcast_video_update(target_video)
         return {
             "status": "success",
-            "message": f"Broadcasted video ({round(file_size/(1024*1024), 2)} MB) to active socket clients.",
+            "message": f"Broadcasted video ({round(file_size/(1024*1024), 2)} MB) to {len(socket_video_server.active_clients)} active socket client(s).",
             "file_size": file_size
         }
     except Exception as err:

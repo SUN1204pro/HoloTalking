@@ -70,6 +70,19 @@ def watch_video_file():
             print(f"Watcher error: {e}")
         time.sleep(0.5)
 
+_server_started = False
+_server_lock = threading.Lock()
+
+def start_server_background():
+    """Start the TCP listener in a background thread once. Safe to call repeatedly
+    (e.g. from the FastAPI startup hook) - only spins up the listener on the first call."""
+    global _server_started
+    with _server_lock:
+        if _server_started:
+            return
+        _server_started = True
+        threading.Thread(target=accept_incoming_connections, daemon=True).start()
+
 def accept_incoming_connections():
     """Listens for incoming client socket connections."""
     server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
