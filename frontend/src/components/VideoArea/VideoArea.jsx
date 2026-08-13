@@ -9,29 +9,48 @@ function VideoArea({
   const [targetIp, setTargetIp] = useState("192.168.1.98");
   const [targetPort, setTargetPort] = useState(9999);
   const [isPushing, setIsPushing] = useState(false);
+  const [isStreaming, setIsStreaming] = useState(false);
   const [pushStatus, setPushStatus] = useState(null); // { type: 'success' | 'error', message: string }
 
-  const handlePushVideo = async () => {
+  const handleToggleStream = async () => {
     setIsPushing(true);
     setPushStatus(null);
     try {
-      const formData = new FormData();
-      formData.append("target_ip", targetIp.trim());
-      formData.append("port", targetPort);
+      if (!isStreaming) {
+        const formData = new FormData();
+        formData.append("target_ip", targetIp.trim());
+        formData.append("port", targetPort);
 
-      const res = await fetch("http://127.0.0.1:8000/api/push_video", {
-        method: "POST",
-        body: formData,
-      });
-
-      const data = await res.json();
-      if (res.ok) {
-        setPushStatus({
-          type: "success",
-          message: data.message || `Successfully pushed video to ${targetIp}:${targetPort}`
+        const res = await fetch("http://127.0.0.1:8000/api/push_video/start", {
+          method: "POST",
+          body: formData,
         });
+
+        const data = await res.json();
+        if (res.ok) {
+          setIsStreaming(true);
+          setPushStatus({
+            type: "success",
+            message: data.message || `Streaming to ${targetIp}:${targetPort}`
+          });
+        } else {
+          throw new Error(data.detail || "Failed to start stream to target IP");
+        }
       } else {
-        throw new Error(data.detail || "Failed to push video to target IP");
+        const res = await fetch("http://127.0.0.1:8000/api/push_video/stop", {
+          method: "POST",
+        });
+
+        const data = await res.json();
+        if (res.ok) {
+          setIsStreaming(false);
+          setPushStatus({
+            type: "success",
+            message: data.message || "Stopped streaming"
+          });
+        } else {
+          throw new Error(data.detail || "Failed to stop stream");
+        }
       }
     } catch (err) {
       setPushStatus({
@@ -88,7 +107,9 @@ function VideoArea({
                   SOCKET VIDEO SENDER (HOLOFAN / DISPLAY LINK)
                 </h3>
                 <p className="text-[10px] text-outline">
-                  Send current video over TCP Socket to target IP
+                  {isStreaming
+                    ? "Streaming continuously - freeze frame while generating, talking clip otherwise"
+                    : "Start a continuous TCP push stream to target IP"}
                 </p>
               </div>
             </div>
@@ -106,7 +127,8 @@ function VideoArea({
                 value={targetIp}
                 onChange={(e) => setTargetIp(e.target.value)}
                 placeholder="192.168.1.98"
-                className="w-full bg-transparent text-xs text-secondary font-mono outline-none"
+                disabled={isStreaming}
+                className="w-full bg-transparent text-xs text-secondary font-mono outline-none disabled:opacity-50"
               />
             </div>
 
@@ -116,24 +138,27 @@ function VideoArea({
                 type="number"
                 value={targetPort}
                 onChange={(e) => setTargetPort(parseInt(e.target.value) || 9999)}
-                className="w-full bg-transparent text-xs text-secondary font-mono outline-none"
+                disabled={isStreaming}
+                className="w-full bg-transparent text-xs text-secondary font-mono outline-none disabled:opacity-50"
               />
             </div>
 
             <button
               type="button"
-              onClick={handlePushVideo}
+              onClick={handleToggleStream}
               disabled={isPushing}
               className={`w-full sm:w-auto px-5 py-2.5 rounded-xl font-label text-xs font-bold tracking-wider uppercase flex items-center justify-center gap-2 transition-all cursor-pointer shadow-lg border ${
-                isPushing 
-                  ? 'bg-amber-500/20 text-amber-300 border-amber-500/40 cursor-wait' 
-                  : 'bg-gradient-to-r from-amber-500 via-amber-400 to-amber-500 text-black border-amber-300 hover:brightness-110 hover:scale-105 active:scale-95'
+                isPushing
+                  ? 'bg-amber-500/20 text-amber-300 border-amber-500/40 cursor-wait'
+                  : isStreaming
+                    ? 'bg-gradient-to-r from-red-500 via-red-400 to-red-500 text-black border-red-300 hover:brightness-110 hover:scale-105 active:scale-95'
+                    : 'bg-gradient-to-r from-amber-500 via-amber-400 to-amber-500 text-black border-amber-300 hover:brightness-110 hover:scale-105 active:scale-95'
               }`}
             >
               <span className="material-symbols-outlined text-sm">
-                {isPushing ? "sync" : "send"}
+                {isPushing ? "sync" : isStreaming ? "stop" : "play_arrow"}
               </span>
-              {isPushing ? "SENDING..." : "SEND VIDEO"}
+              {isPushing ? (isStreaming ? "STOPPING..." : "STARTING...") : isStreaming ? "STOP" : "START"}
             </button>
           </div>
 

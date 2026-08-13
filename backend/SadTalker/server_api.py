@@ -22,6 +22,25 @@ try:
 except Exception:
     pass
 
+def apply_speed_to_audio(audio_path: str, speed: float):
+    """Speeds up/slows down an existing WAV file in-place using ffmpeg's atempo filter
+    (preserves pitch). No-op when speed is ~1.0."""
+    speed = max(0.5, min(2.0, speed or 1.0))
+    if abs(speed - 1.0) < 1e-3:
+        return
+    tmp_path = audio_path + ".speed_tmp.wav"
+    cmd = [
+        "ffmpeg", "-y", "-hide_banner", "-loglevel", "error",
+        "-i", audio_path, "-filter:a", f"atempo={speed}", tmp_path
+    ]
+    try:
+        subprocess.run(cmd, check=True)
+        os.replace(tmp_path, audio_path)
+    except Exception as e:
+        print(f"[TTS speed] Failed to apply speed {speed}x, keeping original tempo:", e)
+        if os.path.exists(tmp_path):
+            os.remove(tmp_path)
+
 def generate_silent_wav(output_path: str, duration_sec: float = 1.5, sample_rate: int = 16000):
     import wave
     import struct
@@ -139,6 +158,104 @@ try:
     VIENEU_AVAILABLE = True
 except ImportError:
     VIENEU_AVAILABLE = False
+
+try:
+    from voxcpm import VoxCPM
+    VOXCPM_AVAILABLE = True
+except ImportError:
+    VOXCPM_AVAILABLE = False
+
+try:
+    from elevenlabs.client import ElevenLabs
+    ELEVENLABS_AVAILABLE = True
+except ImportError:
+    ELEVENLABS_AVAILABLE = False
+
+# --- Custom voice (ElevenLabs voice -> VoxCPM cloning reference) -----------
+# VoxCPM is a heavy local model: load it once, lazily, and reuse across requests.
+CUSTOM_VOICE_CACHE_DIR = "custom_voices"
+os.makedirs(CUSTOM_VOICE_CACHE_DIR, exist_ok=True)
+_voxcpm_instance = None
+
+
+def get_voxcpm():
+    global _voxcpm_instance
+    if _voxcpm_instance is None:
+        print("[VoxCPM] Loading model for the first time (this can take a while)...")
+        _voxcpm_instance = VoxCPM.from_pretrained("openbmb/VoxCPM2")
+    return _voxcpm_instance
+
+
+def get_elevenlabs_client(api_key: str = None):
+    key = (api_key and api_key.strip()) or os.environ.get("ELEVENLABS_API_KEY", "").strip()
+    if not ELEVENLABS_AVAILABLE or not key:
+        return None
+    return ElevenLabs(api_key=key)
+
+
+def get_or_create_reference_audio(voice_id: str, api_key: str = None) -> str:
+    """Resolves an ElevenLabs voice's public preview sample into a local WAV file,
+    used as the VoxCPM voice-cloning reference. Cached on disk so each ElevenLabs
+    voice is only fetched once, not on every generation."""
+    ref_path = os.path.join(CUSTOM_VOICE_CACHE_DIR, f"{voice_id}.wav")
+    if os.path.exists(ref_path):
+        return ref_path
+
+    client = get_elevenlabs_client(api_key)
+    if client is None:
+        raise RuntimeError("ElevenLabs API key not configured. Set ELEVENLABS_API_KEY in .env.")
+
+    voice = client.voices.get(voice_id)
+    preview_url = getattr(voice, "preview_url", None)
+    if not preview_url:
+        raise RuntimeError(f"ElevenLabs voice '{voice_id}' has no preview sample to use as a reference.")
+
+    resp = requests.get(preview_url, timeout=20)
+    resp.raise_for_status()
+    tmp_mp3 = ref_path + ".src.mp3"
+    with open(tmp_mp3, "wb") as f:
+        f.write(resp.content)
+    try:
+        subprocess.run(
+            ["ffmpeg", "-y", "-hide_banner", "-loglevel", "error", "-i", tmp_mp3, ref_path],
+            check=True
+        )
+    finally:
+        if os.path.exists(tmp_mp3):
+            os.remove(tmp_mp3)
+    return ref_path
+
+
+def synthesize_tts(
+    text: str,
+    audio_path: str,
+    speed: float = 1.0,
+    tts_engine: str = "vietneu",
+    voice_name: str = None,
+    elevenlabs_voice_id: str = None,
+    elevenlabs_api_key: str = None,
+):
+    """Synthesizes `text` to `audio_path`, dispatching to either the VieNeu preset
+    voices or VoxCPM cloning a custom ElevenLabs voice reference."""
+    if tts_engine == "voxcpm":
+        if not VOXCPM_AVAILABLE:
+            raise RuntimeError("voxcpm package is not installed.")
+        if not elevenlabs_voice_id:
+            raise RuntimeError("Select an ElevenLabs voice to use as the VoxCPM reference.")
+        ref_path = get_or_create_reference_audio(elevenlabs_voice_id, elevenlabs_api_key)
+        model = get_voxcpm()
+        wav = model.generate(text=text, reference_wav_path=ref_path)
+        import soundfile as sf
+        sf.write(audio_path, wav, model.tts_model.sample_rate)
+    else:
+        if not VIENEU_AVAILABLE:
+            raise RuntimeError("ViEneu TTS library is not installed or available.")
+        tts = Vieneu()
+        voice = tts.get_preset_voice(voice_name or "Thái Sơn")
+        audio_data = tts.infer(text=text, voice=voice)
+        tts.save(audio_data, audio_path)
+    apply_speed_to_audio(audio_path, speed)
+
 
 app = FastAPI(title="OpenTalking + SadTalker + ViEneu API")
 
@@ -271,6 +388,85 @@ def get_voices():
     ]
 
 
+@app.get("/api/elevenlabs/voices")
+def get_elevenlabs_voices(api_key: str = None):
+    """Returns the caller's ElevenLabs voice library, for use as a VoxCPM cloning reference."""
+    if not ELEVENLABS_AVAILABLE:
+        raise HTTPException(status_code=500, detail="elevenlabs package is not installed.")
+    client = get_elevenlabs_client(api_key)
+    if client is None:
+        raise HTTPException(status_code=400, detail="ElevenLabs API key not configured. Set ELEVENLABS_API_KEY in .env.")
+    try:
+        result = client.voices.get_all()
+        return [
+            {
+                "id": v.voice_id,
+                "name": v.name,
+                "category": getattr(v, "category", None),
+                "preview_url": getattr(v, "preview_url", None),
+            }
+            for v in result.voices
+        ]
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"Failed to fetch ElevenLabs voices: {str(e)}")
+
+
+@app.post("/api/elevenlabs/design")
+def design_elevenlabs_voice(voice_description: str = Form(...), api_key: str = Form(None)):
+    """Generates a few voice previews from a text description (ElevenLabs Voice Design).
+    Returns base64 mp3 previews the user can audition before saving one as a real voice."""
+    if not ELEVENLABS_AVAILABLE:
+        raise HTTPException(status_code=500, detail="elevenlabs package is not installed.")
+    client = get_elevenlabs_client(api_key)
+    if client is None:
+        raise HTTPException(status_code=400, detail="ElevenLabs API key not configured. Set ELEVENLABS_API_KEY in .env.")
+    try:
+        result = client.text_to_voice.design(voice_description=voice_description, auto_generate_text=True)
+        return {
+            "text": result.text,
+            "previews": [
+                {
+                    "generated_voice_id": p.generated_voice_id,
+                    "audio_base_64": p.audio_base_64,
+                    "media_type": p.media_type,
+                    "duration_secs": p.duration_secs,
+                }
+                for p in result.previews
+            ],
+        }
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"Failed to design voice: {str(e)}")
+
+
+@app.post("/api/elevenlabs/save-designed-voice")
+def save_designed_voice(
+    voice_name: str = Form(...),
+    voice_description: str = Form(...),
+    generated_voice_id: str = Form(...),
+    api_key: str = Form(None),
+):
+    """Saves a chosen Voice Design preview as a real voice in the caller's ElevenLabs library,
+    so it shows up in /api/elevenlabs/voices and can be used as a VoxCPM cloning reference."""
+    if not ELEVENLABS_AVAILABLE:
+        raise HTTPException(status_code=500, detail="elevenlabs package is not installed.")
+    client = get_elevenlabs_client(api_key)
+    if client is None:
+        raise HTTPException(status_code=400, detail="ElevenLabs API key not configured. Set ELEVENLABS_API_KEY in .env.")
+    try:
+        voice = client.text_to_voice.create(
+            voice_name=voice_name,
+            voice_description=voice_description,
+            generated_voice_id=generated_voice_id,
+        )
+        return {
+            "id": voice.voice_id,
+            "name": voice.name,
+            "preview_url": getattr(voice, "preview_url", None),
+        }
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"Failed to save designed voice: {str(e)}")
+
+
 @app.get("/api/avatars")
 def get_avatars():
     """Returns preset digital human avatars available on server."""
@@ -335,6 +531,10 @@ async def generate_video(
     persona: str = Form(None),
     api_key: str = Form(None),
     voice_name: str = Form("Thái Sơn"),
+    speed: float = Form(1.0),
+    tts_engine: str = Form("vietneu"),
+    elevenlabs_voice_id: str = Form(None),
+    elevenlabs_api_key: str = Form(None),
     preprocess: str = Form("crop"),
     enhancer: str = Form("gfpgan"),
     still: bool = Form(True),
@@ -388,14 +588,15 @@ async def generate_video(
                     "lipsync_engine": lipsync_engine
                 }
 
-            if final_speak_text and final_speak_text.strip() and VIENEU_AVAILABLE:
+            if final_speak_text and final_speak_text.strip():
                 try:
-                    tts = Vieneu()
-                    voice = tts.get_preset_voice(voice_name or "Thái Sơn")
-                    audio_data = tts.infer(text=final_speak_text, voice=voice)
-                    tts.save(audio_data, audio_path)
+                    synthesize_tts(
+                        text=final_speak_text, audio_path=audio_path, speed=speed,
+                        tts_engine=tts_engine, voice_name=voice_name,
+                        elevenlabs_voice_id=elevenlabs_voice_id, elevenlabs_api_key=elevenlabs_api_key
+                    )
                 except Exception as e:
-                    print("ViEneu TTS failed, falling back to original recorded audio:", e)
+                    print(f"TTS ({tts_engine}) failed, falling back to original recorded audio:", e)
                     with open(audio_path, "wb") as buffer:
                         buffer.write(raw_bytes)
             else:
@@ -407,16 +608,14 @@ async def generate_video(
                 shutil.copyfileobj(audio.file, buffer)
 
     if inputType == "text":
-        if VIENEU_AVAILABLE:
-            try:
-                tts = Vieneu()
-                voice = tts.get_preset_voice(voice_name or "Thái Sơn")
-                audio_data = tts.infer(text=final_speak_text, voice=voice)
-                tts.save(audio_data, audio_path)
-            except Exception as e:
-                raise HTTPException(status_code=500, detail=f"ViEneu TTS failed: {str(e)}")
-        else:
-            raise HTTPException(status_code=500, detail="ViEneu TTS library is not installed or available.")
+        try:
+            synthesize_tts(
+                text=final_speak_text, audio_path=audio_path, speed=speed,
+                tts_engine=tts_engine, voice_name=voice_name,
+                elevenlabs_voice_id=elevenlabs_voice_id, elevenlabs_api_key=elevenlabs_api_key
+            )
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"TTS ({tts_engine}) failed: {str(e)}")
 
     # 2. Resolve avatar image path
     image_path = os.path.join(run_dir, "input_avatar.png")
@@ -471,6 +670,8 @@ async def generate_video(
     ans = " ".join(cmd_parts)
 
     start_time = time.time()
+    global _is_generating
+    _is_generating = True
     try:
         process = await asyncio.create_subprocess_shell(ans)
         await process.communicate()
@@ -478,7 +679,9 @@ async def generate_video(
             raise HTTPException(status_code=500, detail="SadTalker video generation script failed.")
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
-    
+    finally:
+        _is_generating = False
+
     elapsed_seconds = round(time.time() - start_time, 2)
 
     list_of_videos = glob.glob(f'{run_dir}/**/*.mp4', recursive=True)
@@ -606,6 +809,10 @@ async def agent_chat(
     history: str = Form(None),
     api_key: str = Form(None),
     voice_name: str = Form("Thái Sơn"),
+    speed: float = Form(1.0),
+    tts_engine: str = Form("vietneu"),
+    elevenlabs_voice_id: str = Form(None),
+    elevenlabs_api_key: str = Form(None),
     preprocess: str = Form("crop"),
     enhancer: str = Form("gfpgan"),
     still: bool = Form(True),
@@ -679,18 +886,16 @@ async def agent_chat(
         api_key=api_key
     )
 
-    # 3. ViEneu TTS Audio Generation
+    # 3. TTS Audio Generation (ViEneu preset voice or VoxCPM cloning an ElevenLabs voice)
     audio_path = os.path.join(run_dir, "agent_voice.wav")
-    if VIENEU_AVAILABLE:
-        try:
-            tts = Vieneu()
-            voice = tts.get_preset_voice(voice_name or "Thái Sơn")
-            audio_data = tts.infer(text=agent_text, voice=voice)
-            tts.save(audio_data, audio_path)
-        except Exception as e:
-            raise HTTPException(status_code=500, detail=f"ViEneu TTS synthesis failed: {str(e)}")
-    else:
-        raise HTTPException(status_code=500, detail="ViEneu TTS library is not available.")
+    try:
+        synthesize_tts(
+            text=agent_text, audio_path=audio_path, speed=speed,
+            tts_engine=tts_engine, voice_name=voice_name,
+            elevenlabs_voice_id=elevenlabs_voice_id, elevenlabs_api_key=elevenlabs_api_key
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"TTS ({tts_engine}) synthesis failed: {str(e)}")
 
     # 4. SadTalker Video Synthesis
     cmd_parts = [
@@ -807,6 +1012,56 @@ async def push_video_to_client(
     except Exception as err:
         raise HTTPException(status_code=500, detail=f"Failed to send video over socket: {str(err)}")
 
+
+@app.post("/api/push_video/start")
+async def start_push_stream(
+    target_ip: str = Form(...),
+    port: int = Form(9999),
+    interval_seconds: float = Form(2.0)
+):
+    """
+    Starts a continuous push loop to target_ip:port: keeps sending the freeze-frame
+    clip while SadTalker is generating (or before any talking clip exists), and the
+    latest talking clip otherwise, forever, until /api/push_video/stop is called.
+    """
+    clean_ip = target_ip.strip()
+    if not clean_ip:
+        raise HTTPException(status_code=400, detail="target_ip is required.")
+
+    with _stream_lock:
+        if _stream_state["active"]:
+            return {
+                "status": "already_running",
+                "message": f"Already streaming to {_stream_state['target_ip']}:{_stream_state['port']}."
+            }
+        _stream_state["active"] = True
+        _stream_state["target_ip"] = clean_ip
+        _stream_state["port"] = port
+        threading.Thread(target=_push_stream_loop, args=(interval_seconds,), daemon=True).start()
+
+    return {"status": "success", "message": f"Started continuous push to {clean_ip}:{port}"}
+
+
+@app.post("/api/push_video/stop")
+async def stop_push_stream():
+    with _stream_lock:
+        if not _stream_state["active"]:
+            return {"status": "not_running", "message": "No active stream to stop."}
+        ip, port = _stream_state["target_ip"], _stream_state["port"]
+        _stream_state["active"] = False
+
+    return {"status": "success", "message": f"Stopped continuous push to {ip}:{port}"}
+
+
+@app.get("/api/push_video/status")
+async def push_stream_status():
+    with _stream_lock:
+        return {
+            "active": _stream_state["active"],
+            "target_ip": _stream_state["target_ip"],
+            "port": _stream_state["port"],
+            "is_generating": _is_generating
+        }
 
 
 

@@ -13,6 +13,9 @@ function App() {
 
   // VIETNEU & GEMINI & SADTALKER STATES
   const [selectedVoice, setSelectedVoice] = useState("Thái Sơn");
+  const [ttsSpeed, setTtsSpeed] = useState(1.0);
+  const [ttsEngine, setTtsEngine] = useState("vietneu"); // "vietneu" | "voxcpm"
+  const [elevenlabsVoiceId, setElevenlabsVoiceId] = useState("");
   const [useGemini, setUseGemini] = useState(true);
   const [persona, setPersona] = useState("");
   const [fastMode, setFastMode] = useState(true);
@@ -171,6 +174,11 @@ function App() {
         }
       }
 
+      formData.append("speed", ttsSpeed);
+      formData.append("tts_engine", ttsEngine);
+      if (ttsEngine === "voxcpm" && elevenlabsVoiceId) {
+        formData.append("elevenlabs_voice_id", elevenlabsVoiceId);
+      }
       formData.append("preprocess", preprocess);
       formData.append("enhancer", enhancer);
       formData.append("still", still ? "true" : "false");
@@ -259,6 +267,12 @@ function App() {
           setAudioFile={setAudioFile}
           selectedVoice={selectedVoice}
           setSelectedVoice={setSelectedVoice}
+          ttsSpeed={ttsSpeed}
+          setTtsSpeed={setTtsSpeed}
+          ttsEngine={ttsEngine}
+          setTtsEngine={setTtsEngine}
+          elevenlabsVoiceId={elevenlabsVoiceId}
+          setElevenlabsVoiceId={setElevenlabsVoiceId}
           useGemini={useGemini}
           setUseGemini={setUseGemini}
           persona={persona}

@@ -7,7 +7,9 @@ import SadTalkerSettings from "./SadTalkerSettings";
 function Sidebar({
   selectedImage, setSelectedImage, handleImageUpload, onSelectCharacter, activeTab, setActiveTab,
   scriptText, setScriptText, audioFile, setAudioFile,
-  selectedVoice, setSelectedVoice, useGemini, setUseGemini, persona, setPersona,
+  selectedVoice, setSelectedVoice, ttsSpeed, setTtsSpeed,
+  ttsEngine, setTtsEngine, elevenlabsVoiceId, setElevenlabsVoiceId,
+  useGemini, setUseGemini, persona, setPersona,
   preprocess, setPreprocess, enhancer, setEnhancer, still, setStill,
   expressionScale, setExpressionScale, fastMode, setFastMode,
   lipsyncEngine, setLipsyncEngine,
@@ -34,6 +36,9 @@ function Sidebar({
             scriptText={scriptText} setScriptText={setScriptText}
             audioFile={audioFile} setAudioFile={setAudioFile}
             selectedVoice={selectedVoice} setSelectedVoice={setSelectedVoice}
+            ttsSpeed={ttsSpeed} setTtsSpeed={setTtsSpeed}
+            ttsEngine={ttsEngine} setTtsEngine={setTtsEngine}
+            elevenlabsVoiceId={elevenlabsVoiceId} setElevenlabsVoiceId={setElevenlabsVoiceId}
             useGemini={useGemini} setUseGemini={setUseGemini}
             persona={persona} setPersona={setPersona}
             handleGenerate={handleGenerate}
