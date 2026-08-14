@@ -9,6 +9,7 @@ function Sidebar({
   scriptText, setScriptText, audioFile, setAudioFile,
   selectedVoice, setSelectedVoice, ttsSpeed, setTtsSpeed,
   ttsEngine, setTtsEngine, elevenlabsVoiceId, setElevenlabsVoiceId,
+  voiceStyle, setVoiceStyle,
   useGemini, setUseGemini, persona, setPersona,
   preprocess, setPreprocess, enhancer, setEnhancer, still, setStill,
   expressionScale, setExpressionScale, fastMode, setFastMode,
@@ -39,6 +40,7 @@ function Sidebar({
             ttsSpeed={ttsSpeed} setTtsSpeed={setTtsSpeed}
             ttsEngine={ttsEngine} setTtsEngine={setTtsEngine}
             elevenlabsVoiceId={elevenlabsVoiceId} setElevenlabsVoiceId={setElevenlabsVoiceId}
+            voiceStyle={voiceStyle} setVoiceStyle={setVoiceStyle}
             useGemini={useGemini} setUseGemini={setUseGemini}
             persona={persona} setPersona={setPersona}
             handleGenerate={handleGenerate}

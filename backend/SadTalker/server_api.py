@@ -186,6 +186,48 @@ def get_voxcpm():
     return _voxcpm_instance
 
 
+# --- viXTTS (Coqui XTTS fine-tuned for Vietnamese) --------------------------
+# Only runs under the separate `tts_env` conda env (has the patched coqui TTS
+# fork with Vietnamese support), so it's launched as its own HTTP subprocess
+# rather than imported in-process like VoxCPM/VieNeu.
+VIXTTS_ENV_PYTHON = os.environ.get(
+    "VIXTTS_ENV_PYTHON", os.path.expanduser("~/miniconda3/envs/tts_env/bin/python")
+)
+VIXTTS_SERVER_URL = os.environ.get("VIXTTS_SERVER_URL", "http://127.0.0.1:8011")
+_vixtts_process = None
+
+
+def ensure_vixtts_server(timeout: float = 300.0):
+    """Lazily launches the viXTTS HTTP server subprocess (tts_env) on first use
+    and waits for it to come up. The model itself loads lazily on that server's
+    first /synthesize call, so this only waits for the process/HTTP layer."""
+    global _vixtts_process
+    try:
+        requests.get(f"{VIXTTS_SERVER_URL}/health", timeout=2)
+        return
+    except Exception:
+        pass
+
+    if _vixtts_process is None or _vixtts_process.poll() is not None:
+        if not os.path.exists(VIXTTS_ENV_PYTHON):
+            raise RuntimeError(f"tts_env python not found at {VIXTTS_ENV_PYTHON}. Set VIXTTS_ENV_PYTHON.")
+        script_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "vixtts_server.py")
+        print("[viXTTS] Starting inference server subprocess...")
+        _vixtts_process = subprocess.Popen(
+            [VIXTTS_ENV_PYTHON, script_path],
+            cwd=os.path.dirname(script_path),
+        )
+
+    start = time.time()
+    while time.time() - start < timeout:
+        try:
+            requests.get(f"{VIXTTS_SERVER_URL}/health", timeout=2)
+            return
+        except Exception:
+            time.sleep(1)
+    raise RuntimeError("viXTTS server did not become ready in time.")
+
+
 def get_elevenlabs_client(api_key: str = None):
     key = (api_key and api_key.strip()) or os.environ.get("ELEVENLABS_API_KEY", "").strip()
     if not ELEVENLABS_AVAILABLE or not key:
@@ -193,34 +235,52 @@ def get_elevenlabs_client(api_key: str = None):
     return ElevenLabs(api_key=key)
 
 
+REFERENCE_TEXT_VI = "Xin chào, đây là giọng nói mẫu tiếng Việt để làm giọng tham chiếu cho việc nhân bản giọng nói."
+
+
 def get_or_create_reference_audio(voice_id: str, api_key: str = None) -> str:
-    """Resolves an ElevenLabs voice's public preview sample into a local WAV file,
-    used as the VoxCPM voice-cloning reference. Cached on disk so each ElevenLabs
-    voice is only fetched once, not on every generation."""
+    """Builds the VoxCPM/viXTTS voice-cloning reference for an ElevenLabs voice_id and
+    caches it as a local WAV file. The reference audio's *content* (Vietnamese prosody,
+    pronunciation) comes from VieNeu -- a native Vietnamese TTS -- which is then re-voiced
+    into the target ElevenLabs voice's timbre via ElevenLabs' speech-to-speech ("Voice
+    Changer") conversion. This sounds far more natural than ElevenLabs' own multilingual
+    TTS speaking Vietnamese directly. Cached on disk so each voice is only built once --
+    delete the cached file under custom_voices/ to force a refresh."""
     ref_path = os.path.join(CUSTOM_VOICE_CACHE_DIR, f"{voice_id}.wav")
     if os.path.exists(ref_path):
         return ref_path
 
+    if not VIENEU_AVAILABLE:
+        raise RuntimeError("ViEneu TTS library is not installed or available.")
     client = get_elevenlabs_client(api_key)
     if client is None:
         raise RuntimeError("ElevenLabs API key not configured. Set ELEVENLABS_API_KEY in .env.")
 
-    voice = client.voices.get(voice_id)
-    preview_url = getattr(voice, "preview_url", None)
-    if not preview_url:
-        raise RuntimeError(f"ElevenLabs voice '{voice_id}' has no preview sample to use as a reference.")
+    vieneu_wav = ref_path + ".vieneu_src.wav"
+    tts = Vieneu()
+    voice = tts.get_preset_voice("Thái Sơn")
+    audio_data = tts.infer(text=REFERENCE_TEXT_VI, voice=voice)
+    tts.save(audio_data, vieneu_wav)
 
-    resp = requests.get(preview_url, timeout=20)
-    resp.raise_for_status()
     tmp_mp3 = ref_path + ".src.mp3"
-    with open(tmp_mp3, "wb") as f:
-        f.write(resp.content)
     try:
+        with open(vieneu_wav, "rb") as f:
+            result = client.speech_to_speech.convert(
+                voice_id=voice_id,
+                audio=(os.path.basename(vieneu_wav), f.read(), "audio/wav"),
+                model_id="eleven_multilingual_sts_v2",
+                output_format="mp3_44100_128",
+            )
+        with open(tmp_mp3, "wb") as f:
+            for chunk in result:
+                f.write(chunk)
         subprocess.run(
             ["ffmpeg", "-y", "-hide_banner", "-loglevel", "error", "-i", tmp_mp3, ref_path],
             check=True
         )
     finally:
+        if os.path.exists(vieneu_wav):
+            os.remove(vieneu_wav)
         if os.path.exists(tmp_mp3):
             os.remove(tmp_mp3)
     return ref_path
@@ -234,9 +294,10 @@ def synthesize_tts(
     voice_name: str = None,
     elevenlabs_voice_id: str = None,
     elevenlabs_api_key: str = None,
+    voice_style: str = None,
 ):
-    """Synthesizes `text` to `audio_path`, dispatching to either the VieNeu preset
-    voices or VoxCPM cloning a custom ElevenLabs voice reference."""
+    """Synthesizes `text` to `audio_path`, dispatching to VieNeu presets, VoxCPM,
+    or viXTTS, the last two cloning a custom ElevenLabs voice reference."""
     if tts_engine == "voxcpm":
         if not VOXCPM_AVAILABLE:
             raise RuntimeError("voxcpm package is not installed.")
@@ -244,9 +305,28 @@ def synthesize_tts(
             raise RuntimeError("Select an ElevenLabs voice to use as the VoxCPM reference.")
         ref_path = get_or_create_reference_audio(elevenlabs_voice_id, elevenlabs_api_key)
         model = get_voxcpm()
-        wav = model.generate(text=text, reference_wav_path=ref_path)
+        # VoxCPM follows a natural-language style/delivery instruction prepended in
+        # parentheses ahead of the actual line, e.g. "(deep, solemn, regal tone) <text>".
+        prompted_text = f"({voice_style.strip()}) {text}" if voice_style and voice_style.strip() else text
+        wav = model.generate(text=prompted_text, reference_wav_path=ref_path, normalize=True)
         import soundfile as sf
         sf.write(audio_path, wav, model.tts_model.sample_rate)
+    elif tts_engine == "vixtts":
+        if not elevenlabs_voice_id:
+            raise RuntimeError("Select an ElevenLabs voice to use as the viXTTS reference.")
+        ref_path = get_or_create_reference_audio(elevenlabs_voice_id, elevenlabs_api_key)
+        ensure_vixtts_server()
+        with open(ref_path, "rb") as f:
+            resp = requests.post(
+                f"{VIXTTS_SERVER_URL}/synthesize",
+                data={"text": text, "language": "vi", "normalize_text": "true"},
+                files={"reference_audio": (os.path.basename(ref_path), f, "audio/wav")},
+                timeout=300,
+            )
+        if not resp.ok:
+            raise RuntimeError(f"viXTTS server error: {resp.text}")
+        with open(audio_path, "wb") as f:
+            f.write(resp.content)
     else:
         if not VIENEU_AVAILABLE:
             raise RuntimeError("ViEneu TTS library is not installed or available.")
@@ -268,6 +348,7 @@ os.makedirs("../../result", exist_ok=True)
 app.mount("/static", StaticFiles(directory="temp_files"), name="static")
 app.mount("/examples", StaticFiles(directory="examples"), name="examples")
 app.mount("/result", StaticFiles(directory="result"), name="result")
+app.mount("/custom_voices", StaticFiles(directory=CUSTOM_VOICE_CACHE_DIR), name="custom_voices")
 
 app.add_middleware(
     CORSMiddleware,
@@ -467,6 +548,47 @@ def save_designed_voice(
         raise HTTPException(status_code=502, detail=f"Failed to save designed voice: {str(e)}")
 
 
+@app.post("/api/elevenlabs/voice-changer")
+def voice_changer(
+    voice_id: str = Form(...),
+    api_key: str = Form(None),
+    audio: UploadFile = File(...),
+):
+    """Speech-to-Speech (ElevenLabs 'Voice Changer'): converts an uploaded recording into the
+    target voice_id, keeping the same delivery/timing. Free-tier compatible, unlike Voice Design.
+    The result is cached as that voice's VoxCPM cloning reference, replacing the short preview clip
+    with a longer, better-conditioned sample."""
+    if not ELEVENLABS_AVAILABLE:
+        raise HTTPException(status_code=500, detail="elevenlabs package is not installed.")
+    client = get_elevenlabs_client(api_key)
+    if client is None:
+        raise HTTPException(status_code=400, detail="ElevenLabs API key not configured. Set ELEVENLABS_API_KEY in .env.")
+
+    tmp_mp3 = os.path.join(CUSTOM_VOICE_CACHE_DIR, f"{voice_id}.sts.mp3")
+    ref_path = os.path.join(CUSTOM_VOICE_CACHE_DIR, f"{voice_id}.wav")
+    try:
+        audio_bytes = audio.file.read()
+        result = client.speech_to_speech.convert(
+            voice_id=voice_id,
+            audio=(audio.filename, audio_bytes, audio.content_type),
+            model_id="eleven_multilingual_sts_v2",
+            output_format="mp3_44100_128",
+        )
+        with open(tmp_mp3, "wb") as f:
+            for chunk in result:
+                f.write(chunk)
+        subprocess.run(
+            ["ffmpeg", "-y", "-hide_banner", "-loglevel", "error", "-i", tmp_mp3, ref_path],
+            check=True
+        )
+        return {"voice_id": voice_id, "reference_audio_url": f"http://127.0.0.1:8000/custom_voices/{voice_id}.wav"}
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"Voice changer conversion failed: {str(e)}")
+    finally:
+        if os.path.exists(tmp_mp3):
+            os.remove(tmp_mp3)
+
+
 @app.get("/api/avatars")
 def get_avatars():
     """Returns preset digital human avatars available on server."""
@@ -535,12 +657,13 @@ async def generate_video(
     tts_engine: str = Form("vietneu"),
     elevenlabs_voice_id: str = Form(None),
     elevenlabs_api_key: str = Form(None),
+    voice_style: str = Form(None),
     preprocess: str = Form("crop"),
     enhancer: str = Form("gfpgan"),
     still: bool = Form(True),
     expression_scale: float = Form(1.0),
     pose_style: int = Form(0),
-    lipsync_engine: str = Form("sadtalker"),
+    lipsync_engine: str = Form("wav2lip"),
     skip_bg_remove: bool = Form(False)
 ):
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -593,7 +716,8 @@ async def generate_video(
                     synthesize_tts(
                         text=final_speak_text, audio_path=audio_path, speed=speed,
                         tts_engine=tts_engine, voice_name=voice_name,
-                        elevenlabs_voice_id=elevenlabs_voice_id, elevenlabs_api_key=elevenlabs_api_key
+                        elevenlabs_voice_id=elevenlabs_voice_id, elevenlabs_api_key=elevenlabs_api_key,
+                        voice_style=voice_style
                     )
                 except Exception as e:
                     print(f"TTS ({tts_engine}) failed, falling back to original recorded audio:", e)
@@ -612,7 +736,8 @@ async def generate_video(
             synthesize_tts(
                 text=final_speak_text, audio_path=audio_path, speed=speed,
                 tts_engine=tts_engine, voice_name=voice_name,
-                elevenlabs_voice_id=elevenlabs_voice_id, elevenlabs_api_key=elevenlabs_api_key
+                elevenlabs_voice_id=elevenlabs_voice_id, elevenlabs_api_key=elevenlabs_api_key,
+                voice_style=voice_style
             )
         except Exception as e:
             raise HTTPException(status_code=500, detail=f"TTS ({tts_engine}) failed: {str(e)}")
@@ -813,6 +938,7 @@ async def agent_chat(
     tts_engine: str = Form("vietneu"),
     elevenlabs_voice_id: str = Form(None),
     elevenlabs_api_key: str = Form(None),
+    voice_style: str = Form(None),
     preprocess: str = Form("crop"),
     enhancer: str = Form("gfpgan"),
     still: bool = Form(True),
@@ -892,7 +1018,8 @@ async def agent_chat(
         synthesize_tts(
             text=agent_text, audio_path=audio_path, speed=speed,
             tts_engine=tts_engine, voice_name=voice_name,
-            elevenlabs_voice_id=elevenlabs_voice_id, elevenlabs_api_key=elevenlabs_api_key
+            elevenlabs_voice_id=elevenlabs_voice_id, elevenlabs_api_key=elevenlabs_api_key,
+            voice_style=voice_style
         )
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"TTS ({tts_engine}) synthesis failed: {str(e)}")

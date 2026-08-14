@@ -84,7 +84,6 @@ function SadTalkerSettings({
               onChange={(e) => setLipsyncEngine(e.target.value)}
               className="w-full bg-black/50 border border-amber-500/30 rounded-lg p-1.5 text-xs text-secondary font-medium outline-none"
             >
-              <option value="sadtalker">SadTalker 3D (Native 3DMM Motion)</option>
               <option value="wav2lip">Wav2Lip + SadTalker Head Motion (Overlay Sync)</option>
             </select>
           </div>

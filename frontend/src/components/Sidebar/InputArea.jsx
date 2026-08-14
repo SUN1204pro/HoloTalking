@@ -19,37 +19,25 @@ function VoiceEngineSelector({
   voices, selectedVoice, setSelectedVoice,
   ttsSpeed, setTtsSpeed, ttsEngine, setTtsEngine,
   elevenlabsVoiceId, setElevenlabsVoiceId,
+  voiceStyle, setVoiceStyle,
 }) {
   const [elevenlabsVoices, setElevenlabsVoices] = useState([]);
   const [elevenlabsStatus, setElevenlabsStatus] = useState("idle"); // idle | loading | ready | error
   const [elevenlabsError, setElevenlabsError] = useState("");
 
-  // Voice Design (text description -> preview clips -> save as a real voice)
-  const [showDesigner, setShowDesigner] = useState(false);
-  const [designDescription, setDesignDescription] = useState("");
-  const [designStatus, setDesignStatus] = useState("idle"); // idle | loading | ready | error | saving
-  const [designError, setDesignError] = useState("");
-  const [designPreviews, setDesignPreviews] = useState([]);
-  const [selectedPreviewId, setSelectedPreviewId] = useState("");
+  // Voice Changer (Speech-to-Speech): upload a recording, convert it into the selected
+  // ElevenLabs voice, and use the result as a richer VoxCPM cloning reference.
+  const [showVoiceChanger, setShowVoiceChanger] = useState(false);
+  const [changerFile, setChangerFile] = useState(null);
+  const [changerStatus, setChangerStatus] = useState("idle"); // idle | converting | ready | error
+  const [changerError, setChangerError] = useState("");
+  const [changerResultUrl, setChangerResultUrl] = useState("");
 
-  const loadVoices = async () => {
-    setElevenlabsStatus("loading");
-    try {
-      const res = await fetch("http://127.0.0.1:8000/api/elevenlabs/voices");
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.detail || "Failed to load ElevenLabs voices");
-      setElevenlabsVoices(data);
-      setElevenlabsStatus("ready");
-      return data;
-    } catch (err) {
-      setElevenlabsError(err.message || "Failed to load ElevenLabs voices");
-      setElevenlabsStatus("error");
-      return [];
-    }
-  };
+  const usesElevenlabsReference = ttsEngine === "voxcpm" || ttsEngine === "vixtts";
+  const engineLabel = ttsEngine === "voxcpm" ? "VoxCPM" : "viXTTS";
 
   useEffect(() => {
-    if (ttsEngine !== "voxcpm" || elevenlabsStatus !== "idle") return;
+    if (!usesElevenlabsReference || elevenlabsStatus !== "idle") return;
     const loadInitialVoices = async () => {
       setElevenlabsStatus("loading");
       try {
@@ -69,55 +57,26 @@ function VoiceEngineSelector({
 
   const selectedElevenlabsVoice = elevenlabsVoices.find((v) => v.id === elevenlabsVoiceId);
 
-  const handleDesignVoice = async () => {
-    if (!designDescription.trim()) return;
-    setDesignStatus("loading");
-    setDesignError("");
-    setDesignPreviews([]);
-    setSelectedPreviewId("");
+  const handleConvertVoice = async () => {
+    if (!changerFile || !elevenlabsVoiceId) return;
+    setChangerStatus("converting");
+    setChangerError("");
+    setChangerResultUrl("");
     try {
       const formData = new FormData();
-      formData.append("voice_description", designDescription.trim());
-      const res = await fetch("http://127.0.0.1:8000/api/elevenlabs/design", {
+      formData.append("voice_id", elevenlabsVoiceId);
+      formData.append("audio", changerFile);
+      const res = await fetch("http://127.0.0.1:8000/api/elevenlabs/voice-changer", {
         method: "POST",
         body: formData,
       });
       const data = await res.json();
-      if (!res.ok) throw new Error(data.detail || "Failed to design voice");
-      setDesignPreviews(data.previews || []);
-      if (data.previews?.length > 0) setSelectedPreviewId(data.previews[0].generated_voice_id);
-      setDesignStatus("ready");
+      if (!res.ok) throw new Error(data.detail || "Voice changer conversion failed");
+      setChangerResultUrl(`${data.reference_audio_url}?t=${Date.now()}`);
+      setChangerStatus("ready");
     } catch (err) {
-      setDesignError(err.message || "Failed to design voice");
-      setDesignStatus("error");
-    }
-  };
-
-  const handleSaveDesignedVoice = async () => {
-    if (!selectedPreviewId) return;
-    setDesignStatus("saving");
-    setDesignError("");
-    try {
-      const formData = new FormData();
-      formData.append("voice_name", designDescription.trim().slice(0, 40) || "Designed Voice");
-      formData.append("voice_description", designDescription.trim());
-      formData.append("generated_voice_id", selectedPreviewId);
-      const res = await fetch("http://127.0.0.1:8000/api/elevenlabs/save-designed-voice", {
-        method: "POST",
-        body: formData,
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.detail || "Failed to save voice");
-      await loadVoices();
-      setElevenlabsVoiceId(data.id);
-      setShowDesigner(false);
-      setDesignStatus("idle");
-      setDesignDescription("");
-      setDesignPreviews([]);
-      setSelectedPreviewId("");
-    } catch (err) {
-      setDesignError(err.message || "Failed to save voice");
-      setDesignStatus("error");
+      setChangerError(err.message || "Voice changer conversion failed");
+      setChangerStatus("error");
     }
   };
 
@@ -126,7 +85,7 @@ function VoiceEngineSelector({
       {/* TTS Engine Toggle */}
       <div>
         <label className="block font-label text-[10px] text-outline mb-1">TTS ENGINE</label>
-        <div className="grid grid-cols-2 gap-2">
+        <div className="grid grid-cols-3 gap-2">
           <button
             type="button"
             onClick={() => setTtsEngine("vietneu")}
@@ -147,7 +106,18 @@ function VoiceEngineSelector({
                 : "bg-black/40 text-outline border-outline-variant/60 hover:border-secondary/60"
             }`}
           >
-            Custom Voice (11L → VoxCPM)
+            11L → VoxCPM
+          </button>
+          <button
+            type="button"
+            onClick={() => setTtsEngine("vixtts")}
+            className={`text-[10px] font-label uppercase py-2 rounded-xl border transition-colors cursor-pointer ${
+              ttsEngine === "vixtts"
+                ? "bg-secondary text-black border-secondary font-bold"
+                : "bg-black/40 text-outline border-outline-variant/60 hover:border-secondary/60"
+            }`}
+          >
+            11L → viXTTS
           </button>
         </div>
       </div>
@@ -175,71 +145,45 @@ function VoiceEngineSelector({
         <div>
           <div className="flex items-center justify-between mb-1">
             <label className="block font-label text-[10px] text-outline">
-              ELEVENLABS VOICE (VOXCPM REFERENCE)
+              ELEVENLABS VOICE ({engineLabel.toUpperCase()} REFERENCE)
             </label>
             <button
               type="button"
-              onClick={() => setShowDesigner((s) => !s)}
+              onClick={() => setShowVoiceChanger((s) => !s)}
               className="text-[10px] font-label uppercase text-secondary hover:underline cursor-pointer"
             >
-              {showDesigner ? "Cancel" : "+ Design a voice"}
+              {showVoiceChanger ? "Cancel" : "+ Voice changer"}
             </button>
           </div>
 
-          {showDesigner && (
+          {showVoiceChanger && (
             <div className="mb-3 p-2.5 rounded-xl border border-outline-variant/60 bg-black/30 space-y-2">
-              <textarea
-                value={designDescription}
-                onChange={(e) => setDesignDescription(e.target.value)}
-                placeholder="Describe the voice you want, e.g. 'a calm deep-voiced middle-aged Vietnamese man, warm and reassuring'"
-                rows={2}
-                className="w-full text-xs bg-black/40 text-on-surface rounded-lg border border-outline-variant/60 p-2 outline-none focus:border-secondary transition-colors resize-none"
+              <p className="text-[10px] text-outline italic">
+                Upload a recording of any speech. It will be converted into the voice selected below (same words/timing, different voice) and used as a richer {engineLabel} cloning reference.
+              </p>
+              <input
+                type="file"
+                accept="audio/*"
+                onChange={(e) => setChangerFile(e.target.files?.[0] || null)}
+                className="w-full text-[11px] text-outline file:mr-2 file:py-1.5 file:px-2.5 file:rounded-lg file:border-0 file:bg-secondary file:text-black file:text-[10px] file:font-label file:uppercase file:cursor-pointer cursor-pointer"
               />
               <button
                 type="button"
-                onClick={handleDesignVoice}
-                disabled={!designDescription.trim() || designStatus === "loading"}
+                onClick={handleConvertVoice}
+                disabled={!changerFile || !elevenlabsVoiceId || changerStatus === "converting"}
                 className="w-full text-[10px] font-label uppercase py-2 rounded-lg border border-secondary/60 text-secondary hover:bg-secondary/10 disabled:opacity-40 disabled:cursor-not-allowed transition-colors cursor-pointer"
               >
-                {designStatus === "loading" ? "Generating previews..." : "Generate previews"}
+                {changerStatus === "converting" ? "Converting..." : "Convert & use as reference"}
               </button>
 
-              {designStatus === "error" && (
-                <div className="text-[11px] text-red-400">⚠ {designError}</div>
+              {changerStatus === "error" && (
+                <div className="text-[11px] text-red-400">⚠ {changerError}</div>
               )}
 
-              {designPreviews.length > 0 && (
-                <div className="space-y-1.5">
-                  {designPreviews.map((p) => (
-                    <label
-                      key={p.generated_voice_id}
-                      className={`flex items-center gap-2 p-1.5 rounded-lg border cursor-pointer transition-colors ${
-                        selectedPreviewId === p.generated_voice_id
-                          ? "border-secondary bg-secondary/10"
-                          : "border-outline-variant/40 hover:border-secondary/50"
-                      }`}
-                    >
-                      <input
-                        type="radio"
-                        name="voice-preview"
-                        checked={selectedPreviewId === p.generated_voice_id}
-                        onChange={() => setSelectedPreviewId(p.generated_voice_id)}
-                      />
-                      <audio
-                        controls
-                        className="flex-1 h-8"
-                        src={`data:${p.media_type || "audio/mpeg"};base64,${p.audio_base_64}`}
-                      />
-                    </label>
-                  ))}
-                  <button
-                    type="button"
-                    onClick={handleSaveDesignedVoice}
-                    disabled={!selectedPreviewId || designStatus === "saving"}
-                    className="w-full text-[10px] font-label uppercase py-2 rounded-lg bg-secondary text-black font-bold disabled:opacity-40 disabled:cursor-not-allowed transition-colors cursor-pointer"
-                  >
-                    {designStatus === "saving" ? "Saving..." : "Use this voice"}
-                  </button>
+              {changerStatus === "ready" && changerResultUrl && (
+                <div className="space-y-1">
+                  <div className="text-[11px] text-secondary">✓ Reference updated for the selected voice.</div>
+                  <audio controls className="w-full" src={changerResultUrl} />
                 </div>
               )}
             </div>
@@ -272,10 +216,29 @@ function VoiceEngineSelector({
                 <audio controls className="w-full mt-2" src={selectedElevenlabsVoice.preview_url} />
               )}
               <p className="text-[10px] text-outline mt-1.5 italic">
-                VoxCPM clones this voice's timbre from its ElevenLabs preview sample and speaks your text locally.
+                {engineLabel} clones this voice's timbre from a VieNeu Vietnamese sample re-voiced via ElevenLabs, then speaks your text locally.
               </p>
             </>
           )}
+        </div>
+      )}
+
+      {ttsEngine === "voxcpm" && (
+        /* VoxCPM follows a natural-language style/delivery instruction prepended to
+           the line, e.g. "deep, solemn, regal tone, speaking slowly and with authority". */
+        <div>
+          <label className="block font-label text-[10px] text-outline mb-1">
+            VOICE STYLE / DELIVERY (OPTIONAL)
+          </label>
+          <textarea
+            value={voiceStyle}
+            onChange={(e) => setVoiceStyle(e.target.value)}
+            placeholder="e.g. deep male Vietnamese king voice, dignified, majestic, speaking slowly with authority"
+            className="w-full min-h-[60px] text-xs bg-black/40 rounded-xl border border-outline-variant/60 p-2.5 outline-none focus:border-secondary resize-none transition-colors custom-scrollbar"
+          />
+          <p className="text-[10px] text-outline mt-1 italic">
+            Describe the tone/emotion in plain language. VoxCPM steers its delivery to match.
+          </p>
         </div>
       )}
 
@@ -303,6 +266,7 @@ function InputArea({
   activeTab, setActiveTab, scriptText, setScriptText, audioFile, setAudioFile,
   selectedVoice, setSelectedVoice, ttsSpeed, setTtsSpeed,
   ttsEngine, setTtsEngine, elevenlabsVoiceId, setElevenlabsVoiceId,
+  voiceStyle, setVoiceStyle,
   useGemini, setUseGemini, persona, setPersona,
   handleGenerate
 }) {
@@ -408,6 +372,7 @@ function InputArea({
             ttsSpeed={ttsSpeed} setTtsSpeed={setTtsSpeed}
             ttsEngine={ttsEngine} setTtsEngine={setTtsEngine}
             elevenlabsVoiceId={elevenlabsVoiceId} setElevenlabsVoiceId={setElevenlabsVoiceId}
+            voiceStyle={voiceStyle} setVoiceStyle={setVoiceStyle}
           />
 
           {/* Text script area */}
@@ -433,6 +398,7 @@ function InputArea({
             ttsSpeed={ttsSpeed} setTtsSpeed={setTtsSpeed}
             ttsEngine={ttsEngine} setTtsEngine={setTtsEngine}
             elevenlabsVoiceId={elevenlabsVoiceId} setElevenlabsVoiceId={setElevenlabsVoiceId}
+            voiceStyle={voiceStyle} setVoiceStyle={setVoiceStyle}
           />
 
           {/* Gemini AI Agent Toggle for Live Mic */}

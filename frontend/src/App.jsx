@@ -14,12 +14,13 @@ function App() {
   // VIETNEU & GEMINI & SADTALKER STATES
   const [selectedVoice, setSelectedVoice] = useState("Thái Sơn");
   const [ttsSpeed, setTtsSpeed] = useState(1.0);
-  const [ttsEngine, setTtsEngine] = useState("vietneu"); // "vietneu" | "voxcpm"
+  const [ttsEngine, setTtsEngine] = useState("vietneu"); // "vietneu" | "voxcpm" | "vixtts"
   const [elevenlabsVoiceId, setElevenlabsVoiceId] = useState("");
+  const [voiceStyle, setVoiceStyle] = useState("");
   const [useGemini, setUseGemini] = useState(true);
   const [persona, setPersona] = useState("");
   const [fastMode, setFastMode] = useState(true);
-  const [lipsyncEngine, setLipsyncEngine] = useState("sadtalker");
+  const [lipsyncEngine, setLipsyncEngine] = useState("wav2lip");
   const [preprocess, setPreprocess] = useState("full");
   const [enhancer, setEnhancer] = useState("none");
   const [still, setStill] = useState(true);
@@ -176,8 +177,11 @@ function App() {
 
       formData.append("speed", ttsSpeed);
       formData.append("tts_engine", ttsEngine);
-      if (ttsEngine === "voxcpm" && elevenlabsVoiceId) {
+      if ((ttsEngine === "voxcpm" || ttsEngine === "vixtts") && elevenlabsVoiceId) {
         formData.append("elevenlabs_voice_id", elevenlabsVoiceId);
+      }
+      if (ttsEngine === "voxcpm" && voiceStyle.trim()) {
+        formData.append("voice_style", voiceStyle.trim());
       }
       formData.append("preprocess", preprocess);
       formData.append("enhancer", enhancer);
@@ -273,6 +277,8 @@ function App() {
           setTtsEngine={setTtsEngine}
           elevenlabsVoiceId={elevenlabsVoiceId}
           setElevenlabsVoiceId={setElevenlabsVoiceId}
+          voiceStyle={voiceStyle}
+          setVoiceStyle={setVoiceStyle}
           useGemini={useGemini}
           setUseGemini={setUseGemini}
           persona={persona}
