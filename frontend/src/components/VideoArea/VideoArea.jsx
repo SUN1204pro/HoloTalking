@@ -4,7 +4,8 @@ import RecentVideos from "./RecentVideos";
 
 function VideoArea({
   selectedImage, isGenerating, generatedVideoUrl, setGeneratedVideoUrl, isPlaying,
-  setIsPlaying, togglePlay, handleDownload, videoRef, spokenText, idleVideoUrl, isIdleGenerating
+  setIsPlaying, togglePlay, handleDownload, videoRef, spokenText, idleVideoUrl, isIdleGenerating,
+  isLastClip, onClipEnded
 }) {
   const [targetIp, setTargetIp] = useState("192.168.1.98");
   const [targetPort, setTargetPort] = useState(9999);
@@ -82,17 +83,19 @@ function VideoArea({
           </button>
         </div>
 
-        <MainPlayer 
+        <MainPlayer
           selectedImage={selectedImage}
           isGenerating={isGenerating}
-          generatedVideoUrl={generatedVideoUrl} 
+          generatedVideoUrl={generatedVideoUrl}
           setGeneratedVideoUrl={setGeneratedVideoUrl}
           isPlaying={isPlaying}
           setIsPlaying={setIsPlaying}
-          togglePlay={togglePlay} 
+          togglePlay={togglePlay}
           videoRef={videoRef}
           idleVideoUrl={idleVideoUrl}
           isIdleGenerating={isIdleGenerating}
+          isLastClip={isLastClip}
+          onClipEnded={onClipEnded}
         />
 
         {/* SOCKET STREAM SENDER CONTROL CARD */}
@@ -183,6 +186,12 @@ function VideoArea({
             <div className="text-[10px] font-label text-secondary uppercase tracking-wider mb-1 flex items-center gap-1.5">
               <span className="material-symbols-outlined text-sm">auto_awesome</span>
               AI Avatar Response Transcript
+              {!isLastClip && (
+                <span className="ml-auto normal-case text-outline/80 font-body italic flex items-center gap-1">
+                  <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse" />
+                  rendering next line...
+                </span>
+              )}
             </div>
             <p className="text-on-surface/90 italic">"{spokenText}"</p>
           </div>

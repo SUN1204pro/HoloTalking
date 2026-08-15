@@ -10,7 +10,9 @@ function MainPlayer({
   togglePlay,
   videoRef,
   idleVideoUrl,
-  isIdleGenerating
+  isIdleGenerating,
+  isLastClip = true,
+  onClipEnded
 }) {
   // Autoplay generated video when ready
   useEffect(() => {
@@ -28,15 +30,15 @@ function MainPlayer({
       
       {/* 1. TALKING VIDEO PLAYER */}
       {generatedVideoUrl && (
-        <video 
+        <video
           ref={videoRef}
-          src={generatedVideoUrl} 
+          src={generatedVideoUrl}
           autoPlay
-          loop
           playsInline
           className="w-full h-full object-contain z-10 relative"
           onPlay={() => setIsPlaying(true)}
           onPause={() => setIsPlaying(false)}
+          onEnded={!isLastClip ? onClipEnded : undefined}
         />
       )}
 

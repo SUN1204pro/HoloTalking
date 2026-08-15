@@ -36,6 +36,13 @@ function App() {
   const [isIdleGenerating, setIsIdleGenerating] = useState(false);
   const videoRef = useRef(null);
 
+  // Streaming playback: clips arrive one sentence at a time over SSE. `isLastClip`
+  // drives whether the <video> should loop (single/final clip, old behavior) or fire
+  // onEnded so we can advance to the next queued clip as soon as it's ready.
+  const [isLastClip, setIsLastClip] = useState(true);
+  const clipQueueRef = useRef([]);
+  const streamRef = useRef({ total: 1, currentIndex: -1, waitingForNext: false });
+
   const isGenerateReady =
     selectedImage &&
     ((activeTab === "TEXT" && scriptText.trim().length >= 3) ||
@@ -107,6 +114,27 @@ function App() {
     }
   };
 
+  // Plays the next clip if it's already queued; otherwise marks that we're waiting
+  // so the SSE reader can hand it off the moment it arrives.
+  const playNextQueuedClip = () => {
+    const state = streamRef.current;
+    const nextIndex = state.currentIndex + 1;
+    const queuedIdx = clipQueueRef.current.findIndex((c) => c.index === nextIndex);
+    if (queuedIdx !== -1) {
+      const clip = clipQueueRef.current.splice(queuedIdx, 1)[0];
+      state.currentIndex = clip.index;
+      state.waitingForNext = false;
+      setIsLastClip(clip.index >= state.total - 1);
+      setGeneratedVideoUrl(`${clip.video_url}?t=${Date.now()}`);
+    } else {
+      state.waitingForNext = true;
+    }
+  };
+
+  const handleClipEnded = () => {
+    playNextQueuedClip();
+  };
+
   const handleGenerate = async (overrideAudioFile = null) => {
     const targetAudio = overrideAudioFile || audioFile;
     setErrorMessage("");
@@ -130,6 +158,9 @@ function App() {
     setGeneratedVideoUrl(null);
     setSpokenText(null);
     setIsPlaying(false);
+    clipQueueRef.current = [];
+    streamRef.current = { total: 1, currentIndex: -1, waitingForNext: true };
+    setIsLastClip(true);
 
     try {
       const formData = new FormData();
@@ -189,7 +220,7 @@ function App() {
       formData.append("expression_scale", expressionScale);
       formData.append("lipsync_engine", lipsyncEngine);
 
-      const response = await fetch("http://127.0.0.1:8000/generate", {
+      const response = await fetch("http://127.0.0.1:8000/generate_stream", {
         method: "POST",
         body: formData,
       });
@@ -207,17 +238,53 @@ function App() {
         throw new Error(detailMsg);
       }
 
-      const data = await response.json();
+      // Server-Sent Events: "meta" (total clip count + full text) arrives first,
+      // then one "clip" event per sentence as each finishes rendering. The first
+      // clip is played the instant it arrives; later ones queue and hand off via
+      // handleClipEnded (wired to the <video>'s onEnded) as soon as they're ready.
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+      let sawAnyClip = false;
+      let streamError = null;
 
-      if (data.video_url) {
-        const timestamp = new Date().getTime();
-        setGeneratedVideoUrl(`${data.video_url}?t=${timestamp}`);
-        if (data.spoken_text) {
-          setSpokenText(data.spoken_text);
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+
+        let sepIndex;
+        while ((sepIndex = buffer.indexOf("\n\n")) !== -1) {
+          const rawEvent = buffer.slice(0, sepIndex);
+          buffer = buffer.slice(sepIndex + 2);
+          const line = rawEvent.split("\n").find((l) => l.startsWith("data: "));
+          if (!line) continue;
+          const payload = JSON.parse(line.slice(6));
+
+          if (payload.type === "meta") {
+            streamRef.current.total = payload.total || 1;
+            if (payload.full_text) setSpokenText(payload.full_text);
+          } else if (payload.type === "clip") {
+            sawAnyClip = true;
+            setIsGenerating(false); // lift the overlay as soon as there's something to watch
+            const state = streamRef.current;
+            if (state.waitingForNext && payload.index === state.currentIndex + 1) {
+              state.currentIndex = payload.index;
+              state.waitingForNext = false;
+              setIsLastClip(payload.index >= state.total - 1);
+              setGeneratedVideoUrl(`${payload.video_url}?t=${Date.now()}`);
+            } else {
+              clipQueueRef.current.push(payload);
+            }
+          } else if (payload.type === "error") {
+            streamError = payload.detail || "Generation failed.";
+          } else if (payload.type === "done") {
+            if (!sawAnyClip) setSpokenText(payload.spoken_text || " ");
+          }
         }
-      } else {
-        setSpokenText(data.spoken_text || " ");
       }
+
+      if (streamError) throw new Error(streamError);
     } catch (error) {
       console.error("Video Generation Error:", error);
       const displayMsg =
@@ -314,6 +381,8 @@ function App() {
           spokenText={spokenText}
           idleVideoUrl={idleVideoUrl}
           isIdleGenerating={isIdleGenerating}
+          isLastClip={isLastClip}
+          onClipEnded={handleClipEnded}
         />
       </main>
     </div>
