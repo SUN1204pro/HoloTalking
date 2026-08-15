@@ -1,8 +1,12 @@
 from glob import glob
 import shutil
+import os, sys, time
+# Let unsupported ops on Apple's MPS backend silently fall back to CPU instead of
+# erroring, since SadTalker uses a few ops MPS doesn't implement yet. Must be set
+# before torch is imported.
+os.environ.setdefault("PYTORCH_ENABLE_MPS_FALLBACK", "1")
 import torch
 from time import  strftime
-import os, sys, time
 from argparse import ArgumentParser
 
 from src.utils.preprocess import CropAndExtract
@@ -86,12 +90,14 @@ def main(args):
     
     result = animate_from_coeff.generate(data, save_dir, pic_path, crop_info, \
                                 enhancer=args.enhancer, background_enhancer=args.background_enhancer, preprocess=args.preprocess, img_size=args.size)
-    
-    shutil.move(result, save_dir+'.mp4')
-    print('The generated video is named:', save_dir+'.mp4')
 
-    if not args.verbose:
-        shutil.rmtree(save_dir)
+    # Final video goes under --result_dir, not next to source_image: server_api.py
+    # searches result_dir for the output, and source_image's "hcmus" sibling directory
+    # is intentionally left in place (not rmtree'd) so its cached 3DMM/landmark data
+    # can be reused on the next generation against the same avatar.
+    final_video_path = os.path.join(args.result_dir, os.path.basename(save_dir) + '.mp4')
+    shutil.move(result, final_video_path)
+    print('The generated video is named:', final_video_path)
 
     
 if __name__ == '__main__':
@@ -136,8 +142,12 @@ if __name__ == '__main__':
 
     args = parser.parse_args()
 
-    if torch.cuda.is_available() and not args.cpu:
+    if args.cpu:
+        args.device = "cpu"
+    elif torch.cuda.is_available():
         args.device = "cuda"
+    elif torch.backends.mps.is_available():
+        args.device = "mps"
     else:
         args.device = "cpu"
 

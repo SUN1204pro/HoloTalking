@@ -33,11 +33,8 @@ function VoiceEngineSelector({
   const [changerError, setChangerError] = useState("");
   const [changerResultUrl, setChangerResultUrl] = useState("");
 
-  const usesElevenlabsReference = ttsEngine === "voxcpm" || ttsEngine === "vixtts";
-  const engineLabel = ttsEngine === "voxcpm" ? "VoxCPM" : "viXTTS";
-
   useEffect(() => {
-    if (!usesElevenlabsReference || elevenlabsStatus !== "idle") return;
+    if (ttsEngine !== "voxcpm" || elevenlabsStatus !== "idle") return;
     const loadInitialVoices = async () => {
       setElevenlabsStatus("loading");
       try {
@@ -85,7 +82,7 @@ function VoiceEngineSelector({
       {/* TTS Engine Toggle */}
       <div>
         <label className="block font-label text-[10px] text-outline mb-1">TTS ENGINE</label>
-        <div className="grid grid-cols-3 gap-2">
+        <div className="grid grid-cols-2 gap-2">
           <button
             type="button"
             onClick={() => setTtsEngine("vietneu")}
@@ -106,18 +103,7 @@ function VoiceEngineSelector({
                 : "bg-black/40 text-outline border-outline-variant/60 hover:border-secondary/60"
             }`}
           >
-            11L → VoxCPM
-          </button>
-          <button
-            type="button"
-            onClick={() => setTtsEngine("vixtts")}
-            className={`text-[10px] font-label uppercase py-2 rounded-xl border transition-colors cursor-pointer ${
-              ttsEngine === "vixtts"
-                ? "bg-secondary text-black border-secondary font-bold"
-                : "bg-black/40 text-outline border-outline-variant/60 hover:border-secondary/60"
-            }`}
-          >
-            11L → viXTTS
+            Custom Voice (11L → VoxCPM)
           </button>
         </div>
       </div>
@@ -145,7 +131,7 @@ function VoiceEngineSelector({
         <div>
           <div className="flex items-center justify-between mb-1">
             <label className="block font-label text-[10px] text-outline">
-              ELEVENLABS VOICE ({engineLabel.toUpperCase()} REFERENCE)
+              ELEVENLABS VOICE (VOXCPM REFERENCE)
             </label>
             <button
               type="button"
@@ -159,7 +145,7 @@ function VoiceEngineSelector({
           {showVoiceChanger && (
             <div className="mb-3 p-2.5 rounded-xl border border-outline-variant/60 bg-black/30 space-y-2">
               <p className="text-[10px] text-outline italic">
-                Upload a recording of any speech. It will be converted into the voice selected below (same words/timing, different voice) and used as a richer {engineLabel} cloning reference.
+                Upload a recording of any speech. It will be converted into the voice selected below (same words/timing, different voice) and used as a richer VoxCPM cloning reference.
               </p>
               <input
                 type="file"
@@ -216,7 +202,7 @@ function VoiceEngineSelector({
                 <audio controls className="w-full mt-2" src={selectedElevenlabsVoice.preview_url} />
               )}
               <p className="text-[10px] text-outline mt-1.5 italic">
-                {engineLabel} clones this voice's timbre from a VieNeu Vietnamese sample re-voiced via ElevenLabs, then speaks your text locally.
+                VoxCPM clones this voice's timbre from a VieNeu Vietnamese sample re-voiced via ElevenLabs, then speaks your text locally.
               </p>
             </>
           )}
@@ -305,7 +291,12 @@ function InputArea({
   const startLiveRecording = async () => {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      mediaRecorderRef.current = new MediaRecorder(stream);
+      // MediaRecorder actually encodes as WebM/Opus (or whatever the browser supports) --
+      // it does not produce real WAV/PCM. Label the blob honestly; the backend transcodes
+      // by content via ffmpeg regardless, but a correct extension/type avoids confusion.
+      const mimeType = MediaRecorder.isTypeSupported("audio/webm") ? "audio/webm" : "";
+      mediaRecorderRef.current = new MediaRecorder(stream, mimeType ? { mimeType } : undefined);
+      const recordedMimeType = mediaRecorderRef.current.mimeType || "audio/webm";
       audioChunksRef.current = [];
 
       mediaRecorderRef.current.ondataavailable = (event) => {
@@ -315,8 +306,8 @@ function InputArea({
       };
 
       mediaRecorderRef.current.onstop = () => {
-        const audioBlob = new Blob(audioChunksRef.current, { type: "audio/wav" });
-        const liveFile = new File([audioBlob], `live_mic_voice_${Date.now()}.wav`, { type: "audio/wav" });
+        const audioBlob = new Blob(audioChunksRef.current, { type: recordedMimeType });
+        const liveFile = new File([audioBlob], `live_mic_voice_${Date.now()}.webm`, { type: recordedMimeType });
         setAudioFile(liveFile);
         stream.getTracks().forEach((track) => track.stop());
 

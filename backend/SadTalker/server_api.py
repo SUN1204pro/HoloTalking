@@ -8,12 +8,15 @@ import socket
 import struct
 import threading
 import subprocess
+import hashlib
+import uuid
 from datetime import datetime
 from fastapi import FastAPI, UploadFile, File, Form, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 import requests
 import io
+from src.utils.wav2lip_processor import process_wav2lip
 from PIL import Image
 try:
     from dotenv import load_dotenv
@@ -40,6 +43,34 @@ def apply_speed_to_audio(audio_path: str, speed: float):
         print(f"[TTS speed] Failed to apply speed {speed}x, keeping original tempo:", e)
         if os.path.exists(tmp_path):
             os.remove(tmp_path)
+
+def transcode_to_wav_bytes(raw_bytes: bytes) -> bytes:
+    """Re-encodes arbitrary audio bytes (e.g. a browser MediaRecorder blob, which is
+    actually WebM/Opus even when the frontend names the file '*.wav') into real WAV
+    PCM bytes via ffmpeg, which sniffs the real container from content rather than
+    trusting any filename/extension. Gemini's audio understanding rejects/mis-parses
+    audio whose declared mime type doesn't match its actual encoding, so anything
+    forwarded to it as "audio/wav" must actually be WAV."""
+    run_id = uuid.uuid4().hex
+    tmp_in = os.path.join("temp_files", f"{run_id}_in.bin")
+    tmp_out = os.path.join("temp_files", f"{run_id}_out.wav")
+    os.makedirs("temp_files", exist_ok=True)
+    try:
+        with open(tmp_in, "wb") as f:
+            f.write(raw_bytes)
+        subprocess.run(
+            ["ffmpeg", "-y", "-hide_banner", "-loglevel", "error",
+             "-i", tmp_in, "-ar", "16000", "-ac", "1", tmp_out],
+            check=True
+        )
+        with open(tmp_out, "rb") as f:
+            return f.read()
+    finally:
+        if os.path.exists(tmp_in):
+            os.remove(tmp_in)
+        if os.path.exists(tmp_out):
+            os.remove(tmp_out)
+
 
 def generate_silent_wav(output_path: str, duration_sec: float = 1.5, sample_rate: int = 16000):
     import wave
@@ -153,6 +184,25 @@ def crop_to_1x1_square(input_path: str, output_path: str, target_size: int = 512
         return input_path
 
 
+# SadTalker's preprocessing (face crop + 3DMM coefficient extraction) is itself
+# cache-aware -- it skips recomputation if the same source_image path already has a
+# ".mat"/landmarks file sitting next to it. But server_api.py used to hand it a
+# freshly timestamped copy of the avatar on every request, so that cache never hit.
+# Keying the copy by content hash means repeat generations against the same avatar
+# reuse the same path and actually get the free 3DMM/landmark cache hit.
+AVATAR_CACHE_DIR = "avatar_cache"
+os.makedirs(AVATAR_CACHE_DIR, exist_ok=True)
+
+
+def get_cached_avatar_path(image_path: str) -> str:
+    with open(image_path, "rb") as f:
+        digest = hashlib.md5(f.read()).hexdigest()
+    cached_path = os.path.join(AVATAR_CACHE_DIR, f"{digest}.png")
+    if not os.path.exists(cached_path):
+        shutil.copy(image_path, cached_path)
+    return cached_path
+
+
 try:
     from vieneu import Vieneu
     VIENEU_AVAILABLE = True
@@ -186,48 +236,6 @@ def get_voxcpm():
     return _voxcpm_instance
 
 
-# --- viXTTS (Coqui XTTS fine-tuned for Vietnamese) --------------------------
-# Only runs under the separate `tts_env` conda env (has the patched coqui TTS
-# fork with Vietnamese support), so it's launched as its own HTTP subprocess
-# rather than imported in-process like VoxCPM/VieNeu.
-VIXTTS_ENV_PYTHON = os.environ.get(
-    "VIXTTS_ENV_PYTHON", os.path.expanduser("~/miniconda3/envs/tts_env/bin/python")
-)
-VIXTTS_SERVER_URL = os.environ.get("VIXTTS_SERVER_URL", "http://127.0.0.1:8011")
-_vixtts_process = None
-
-
-def ensure_vixtts_server(timeout: float = 300.0):
-    """Lazily launches the viXTTS HTTP server subprocess (tts_env) on first use
-    and waits for it to come up. The model itself loads lazily on that server's
-    first /synthesize call, so this only waits for the process/HTTP layer."""
-    global _vixtts_process
-    try:
-        requests.get(f"{VIXTTS_SERVER_URL}/health", timeout=2)
-        return
-    except Exception:
-        pass
-
-    if _vixtts_process is None or _vixtts_process.poll() is not None:
-        if not os.path.exists(VIXTTS_ENV_PYTHON):
-            raise RuntimeError(f"tts_env python not found at {VIXTTS_ENV_PYTHON}. Set VIXTTS_ENV_PYTHON.")
-        script_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "vixtts_server.py")
-        print("[viXTTS] Starting inference server subprocess...")
-        _vixtts_process = subprocess.Popen(
-            [VIXTTS_ENV_PYTHON, script_path],
-            cwd=os.path.dirname(script_path),
-        )
-
-    start = time.time()
-    while time.time() - start < timeout:
-        try:
-            requests.get(f"{VIXTTS_SERVER_URL}/health", timeout=2)
-            return
-        except Exception:
-            time.sleep(1)
-    raise RuntimeError("viXTTS server did not become ready in time.")
-
-
 def get_elevenlabs_client(api_key: str = None):
     key = (api_key and api_key.strip()) or os.environ.get("ELEVENLABS_API_KEY", "").strip()
     if not ELEVENLABS_AVAILABLE or not key:
@@ -239,7 +247,7 @@ REFERENCE_TEXT_VI = "Xin chào, đây là giọng nói mẫu tiếng Việt đ�
 
 
 def get_or_create_reference_audio(voice_id: str, api_key: str = None) -> str:
-    """Builds the VoxCPM/viXTTS voice-cloning reference for an ElevenLabs voice_id and
+    """Builds the VoxCPM voice-cloning reference for an ElevenLabs voice_id and
     caches it as a local WAV file. The reference audio's *content* (Vietnamese prosody,
     pronunciation) comes from VieNeu -- a native Vietnamese TTS -- which is then re-voiced
     into the target ElevenLabs voice's timbre via ElevenLabs' speech-to-speech ("Voice
@@ -296,8 +304,8 @@ def synthesize_tts(
     elevenlabs_api_key: str = None,
     voice_style: str = None,
 ):
-    """Synthesizes `text` to `audio_path`, dispatching to VieNeu presets, VoxCPM,
-    or viXTTS, the last two cloning a custom ElevenLabs voice reference."""
+    """Synthesizes `text` to `audio_path`, dispatching to VieNeu presets or VoxCPM,
+    the latter cloning a custom ElevenLabs voice reference."""
     if tts_engine == "voxcpm":
         if not VOXCPM_AVAILABLE:
             raise RuntimeError("voxcpm package is not installed.")
@@ -311,22 +319,6 @@ def synthesize_tts(
         wav = model.generate(text=prompted_text, reference_wav_path=ref_path, normalize=True)
         import soundfile as sf
         sf.write(audio_path, wav, model.tts_model.sample_rate)
-    elif tts_engine == "vixtts":
-        if not elevenlabs_voice_id:
-            raise RuntimeError("Select an ElevenLabs voice to use as the viXTTS reference.")
-        ref_path = get_or_create_reference_audio(elevenlabs_voice_id, elevenlabs_api_key)
-        ensure_vixtts_server()
-        with open(ref_path, "rb") as f:
-            resp = requests.post(
-                f"{VIXTTS_SERVER_URL}/synthesize",
-                data={"text": text, "language": "vi", "normalize_text": "true"},
-                files={"reference_audio": (os.path.basename(ref_path), f, "audio/wav")},
-                timeout=300,
-            )
-        if not resp.ok:
-            raise RuntimeError(f"viXTTS server error: {resp.text}")
-        with open(audio_path, "wb") as f:
-            f.write(resp.content)
     else:
         if not VIENEU_AVAILABLE:
             raise RuntimeError("ViEneu TTS library is not installed or available.")
@@ -659,7 +651,7 @@ async def generate_video(
     elevenlabs_api_key: str = Form(None),
     voice_style: str = Form(None),
     preprocess: str = Form("crop"),
-    enhancer: str = Form("gfpgan"),
+    enhancer: str = Form("none"),
     still: bool = Form(True),
     expression_scale: float = Form(1.0),
     pose_style: int = Form(0),
@@ -690,9 +682,10 @@ async def generate_video(
             audio.file.seek(0)
             raw_bytes = audio.file.read()
             try:
+                wav_bytes = transcode_to_wav_bytes(raw_bytes)
                 final_speak_text = generate_gemini_response(
-                    audio_bytes=raw_bytes,
-                    mime_type=audio.content_type or "audio/wav",
+                    audio_bytes=wav_bytes,
+                    mime_type="audio/wav",
                     persona=persona,
                     api_key=api_key
                 )
@@ -722,14 +715,18 @@ async def generate_video(
                 except Exception as e:
                     print(f"TTS ({tts_engine}) failed, falling back to original recorded audio:", e)
                     with open(audio_path, "wb") as buffer:
-                        buffer.write(raw_bytes)
+                        buffer.write(wav_bytes)
             else:
                 with open(audio_path, "wb") as buffer:
-                    buffer.write(raw_bytes)
+                    buffer.write(wav_bytes)
         else:
+            # Browser MediaRecorder blobs are commonly WebM/Opus even though the
+            # frontend names the file "*.wav" -- transcode by content, not by name,
+            # so SadTalker's audio loader always receives a real WAV file.
             audio.file.seek(0)
+            raw_bytes = audio.file.read()
             with open(audio_path, "wb") as buffer:
-                shutil.copyfileobj(audio.file, buffer)
+                buffer.write(transcode_to_wav_bytes(raw_bytes))
 
     if inputType == "text":
         try:
@@ -773,13 +770,14 @@ async def generate_video(
     global _last_avatar_image_path
     _last_avatar_image_path = output_path
     _build_freeze_video(output_path)
+    cached_avatar_path = get_cached_avatar_path(output_path)
 
     # 3. Construct SadTalker inference command using active Python executable
     python_exe = sys.executable
     cmd_parts = [
         f'"{python_exe}"', "inference.py",
         "--driven_audio", f'"{audio_path}"',
-        "--source_image", f'"{output_path}"',
+        "--source_image", f'"{cached_avatar_path}"',
         "--result_dir", f'"{run_dir}"',
         "--preprocess", preprocess if preprocess in ["crop", "extcrop", "full", "extfull", "resize"] else "crop",
         "--expression_scale", str(expression_scale),
@@ -940,7 +938,7 @@ async def agent_chat(
     elevenlabs_api_key: str = Form(None),
     voice_style: str = Form(None),
     preprocess: str = Form("crop"),
-    enhancer: str = Form("gfpgan"),
+    enhancer: str = Form("none"),
     still: bool = Form(True),
     expression_scale: float = Form(1.0),
     pose_style: int = Form(0),
@@ -1025,10 +1023,11 @@ async def agent_chat(
         raise HTTPException(status_code=500, detail=f"TTS ({tts_engine}) synthesis failed: {str(e)}")
 
     # 4. SadTalker Video Synthesis
+    cached_avatar_path = get_cached_avatar_path(output_path)
     cmd_parts = [
         "python", "inference.py",
         "--driven_audio", f'"{audio_path}"',
-        "--source_image", f'"{output_path}"',
+        "--source_image", f'"{cached_avatar_path}"',
         "--result_dir", f'"{run_dir}"',
         "--preprocess", preprocess if preprocess in ["crop", "extcrop", "full", "extfull", "resize"] else "crop",
         "--expression_scale", str(expression_scale),

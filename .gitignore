@@ -20,6 +20,7 @@ backend/SadTalker/gfpgan/
 backend/SadTalker/results/
 backend/SadTalker/result/
 backend/SadTalker/temp_files/
+backend/SadTalker/avatar_cache/
 backend/SadTalker/venv/
 result/
 backend/*_rembg.png

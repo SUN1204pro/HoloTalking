@@ -15,7 +15,7 @@ def kp2gaussian(kp, spatial_size, kp_variance):
     """
     mean = kp['value']
 
-    coordinate_grid = make_coordinate_grid(spatial_size, mean.type())
+    coordinate_grid = make_coordinate_grid(spatial_size, mean)
     number_of_leading_dimensions = len(mean.shape) - 1
     shape = (1,) * number_of_leading_dimensions + coordinate_grid.shape
     coordinate_grid = coordinate_grid.view(*shape)
@@ -32,13 +32,19 @@ def kp2gaussian(kp, spatial_size, kp_variance):
 
     return out
 
-def make_coordinate_grid_2d(spatial_size, type):
+def make_coordinate_grid_2d(spatial_size, ref):
     """
     Create a meshgrid [-1,1] x [-1,1] of given spatial_size.
+    `ref` is a tensor (or legacy type string) whose device/dtype the grid should match --
+    a tensor is used via `.type_as()` since `.type(str)` doesn't understand MPS strings.
     """
     h, w = spatial_size
-    x = torch.arange(w).type(type)
-    y = torch.arange(h).type(type)
+    if isinstance(ref, str):
+        x = torch.arange(w).type(ref)
+        y = torch.arange(h).type(ref)
+    else:
+        x = torch.arange(w).type_as(ref)
+        y = torch.arange(h).type_as(ref)
 
     x = (2 * (x / (w - 1)) - 1)
     y = (2 * (y / (h - 1)) - 1)
@@ -51,11 +57,19 @@ def make_coordinate_grid_2d(spatial_size, type):
     return meshed
 
 
-def make_coordinate_grid(spatial_size, type):
+def make_coordinate_grid(spatial_size, ref):
+    """`ref` is a tensor (or legacy type string) whose device/dtype the grid should
+    match -- a tensor is used via `.type_as()` since `.type(str)` doesn't understand
+    MPS type strings like 'torch.mps.FloatTensor'."""
     d, h, w = spatial_size
-    x = torch.arange(w).type(type)
-    y = torch.arange(h).type(type)
-    z = torch.arange(d).type(type)
+    if isinstance(ref, str):
+        x = torch.arange(w).type(ref)
+        y = torch.arange(h).type(ref)
+        z = torch.arange(d).type(ref)
+    else:
+        x = torch.arange(w).type_as(ref)
+        y = torch.arange(h).type_as(ref)
+        z = torch.arange(d).type_as(ref)
 
     x = (2 * (x / (w - 1)) - 1)
     y = (2 * (y / (h - 1)) - 1)
