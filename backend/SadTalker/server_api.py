@@ -206,6 +206,27 @@ def get_cached_avatar_path(image_path: str) -> str:
     return cached_path
 
 
+def clear_results_and_temp_files():
+    """Wipes every prior generation's output before starting a new avatar, so
+    temp_files/ and result/ don't accumulate old runs indefinitely. Only clears
+    contents -- the directories themselves (and avatar_cache/custom_voices, which
+    are intentionally persistent caches) are left in place."""
+    for dir_path in ("temp_files", "result"):
+        if not os.path.isdir(dir_path):
+            continue
+        for entry in os.listdir(dir_path):
+            entry_path = os.path.join(dir_path, entry)
+            try:
+                if os.path.isdir(entry_path) and not os.path.islink(entry_path):
+                    shutil.rmtree(entry_path)
+                else:
+                    os.remove(entry_path)
+            except Exception as e:
+                print(f"[cleanup] Failed to remove {entry_path}: {e}")
+    os.makedirs("temp_files", exist_ok=True)
+    os.makedirs("result", exist_ok=True)
+
+
 try:
     from vieneu import Vieneu
     VIENEU_AVAILABLE = True
@@ -604,6 +625,8 @@ async def preprocess_avatar(
     image: UploadFile = File(None),
     preset_avatar: str = Form(None)
 ):
+    clear_results_and_temp_files()
+
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     run_dir = os.path.join("temp_files", f"preprocess_{timestamp}")
     os.makedirs(run_dir, exist_ok=True)
@@ -654,27 +677,8 @@ async def render_talking_clip(
 ) -> str:
     """Runs SadTalker (+ optional Wav2Lip refinement) on an already-synthesized audio
     clip and returns the path to the final video. Shared by /generate and
-    /generate_stream so a multi-sentence script can render clip-by-clip.
-
-    lipsync_engine == "wav2lip_only" skips SadTalker's head-motion rendering
-    entirely and runs Wav2Lip directly on the static avatar image: no head
-    movement, just mouth animation, but much faster (no SadTalker cold-start
-    or per-frame face-render pass)."""
+    /generate_stream so a multi-sentence script can render clip-by-clip."""
     global _is_generating
-    if lipsync_engine == "wav2lip_only":
-        _is_generating = True
-        try:
-            final_video_path = os.path.join(run_dir, clip_name)
-            result_path = process_wav2lip(cached_avatar_path, audio_path, final_video_path)
-        finally:
-            _is_generating = False
-        if result_path != final_video_path or not os.path.exists(final_video_path):
-            raise HTTPException(
-                status_code=500,
-                detail="Wav2Lip-only generation failed (checkpoint missing or inference error) -- check server logs."
-            )
-        return final_video_path
-
     python_exe = sys.executable
     cmd_parts = [
         f'"{python_exe}"', "inference.py",

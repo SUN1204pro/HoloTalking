@@ -85,7 +85,6 @@ function SadTalkerSettings({
               className="w-full bg-black/50 border border-amber-500/30 rounded-lg p-1.5 text-xs text-secondary font-medium outline-none"
             >
               <option value="wav2lip">Wav2Lip + SadTalker Head Motion (Overlay Sync)</option>
-              <option value="wav2lip_only">Wav2Lip Only (Static Image, No Head Motion, Faster)</option>
             </select>
           </div>
 
