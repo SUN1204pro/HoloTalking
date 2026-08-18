@@ -25,6 +25,10 @@ function VoiceEngineSelector({
   const [elevenlabsStatus, setElevenlabsStatus] = useState("idle"); // idle | loading | ready | error
   const [elevenlabsError, setElevenlabsError] = useState("");
 
+  // VoxCPM cloning source: an ElevenLabs voice, or -- fully local and free -- a VieNeu
+  // preset's own timbre used directly as the reference (no ElevenLabs involved).
+  const [voxcpmCloneSource, setVoxcpmCloneSource] = useState("elevenlabs"); // "elevenlabs" | "vietneu"
+
   // Voice Changer (Speech-to-Speech): upload a recording, convert it into the selected
   // ElevenLabs voice, and use the result as a richer VoxCPM cloning reference.
   const [showVoiceChanger, setShowVoiceChanger] = useState(false);
@@ -127,83 +131,132 @@ function VoiceEngineSelector({
           </select>
         </div>
       ) : (
-        /* ElevenLabs Custom Voice Selector -> used as VoxCPM cloning reference */
+        /* VoxCPM cloning reference: an ElevenLabs voice, or a local VieNeu preset */
         <div>
-          <div className="flex items-center justify-between mb-1">
-            <label className="block font-label text-[10px] text-outline">
-              ELEVENLABS VOICE (VOXCPM REFERENCE)
-            </label>
+          <label className="block font-label text-[10px] text-outline mb-1">
+            VOXCPM CLONE SOURCE
+          </label>
+          <div className="grid grid-cols-2 gap-2 mb-2">
             <button
               type="button"
-              onClick={() => setShowVoiceChanger((s) => !s)}
-              className="text-[10px] font-label uppercase text-secondary hover:underline cursor-pointer"
+              onClick={() => setVoxcpmCloneSource("elevenlabs")}
+              className={`text-[10px] font-label uppercase py-1.5 rounded-lg border transition-colors cursor-pointer ${
+                voxcpmCloneSource === "elevenlabs"
+                  ? "bg-secondary text-black border-secondary font-bold"
+                  : "bg-black/40 text-outline border-outline-variant/60 hover:border-secondary/60"
+              }`}
             >
-              {showVoiceChanger ? "Cancel" : "+ Voice changer"}
+              ElevenLabs Voice
+            </button>
+            <button
+              type="button"
+              onClick={() => { setVoxcpmCloneSource("vietneu"); setElevenlabsVoiceId(""); }}
+              className={`text-[10px] font-label uppercase py-1.5 rounded-lg border transition-colors cursor-pointer ${
+                voxcpmCloneSource === "vietneu"
+                  ? "bg-secondary text-black border-secondary font-bold"
+                  : "bg-black/40 text-outline border-outline-variant/60 hover:border-secondary/60"
+              }`}
+            >
+              VieNeu Preset (Local, Free)
             </button>
           </div>
 
-          {showVoiceChanger && (
-            <div className="mb-3 p-2.5 rounded-xl border border-outline-variant/60 bg-black/30 space-y-2">
-              <p className="text-[10px] text-outline italic">
-                Upload a recording of any speech. It will be converted into the voice selected below (same words/timing, different voice) and used as a richer VoxCPM cloning reference.
-              </p>
-              <input
-                type="file"
-                accept="audio/*"
-                onChange={(e) => setChangerFile(e.target.files?.[0] || null)}
-                className="w-full text-[11px] text-outline file:mr-2 file:py-1.5 file:px-2.5 file:rounded-lg file:border-0 file:bg-secondary file:text-black file:text-[10px] file:font-label file:uppercase file:cursor-pointer cursor-pointer"
-              />
-              <button
-                type="button"
-                onClick={handleConvertVoice}
-                disabled={!changerFile || !elevenlabsVoiceId || changerStatus === "converting"}
-                className="w-full text-[10px] font-label uppercase py-2 rounded-lg border border-secondary/60 text-secondary hover:bg-secondary/10 disabled:opacity-40 disabled:cursor-not-allowed transition-colors cursor-pointer"
-              >
-                {changerStatus === "converting" ? "Converting..." : "Convert & use as reference"}
-              </button>
-
-              {changerStatus === "error" && (
-                <div className="text-[11px] text-red-400">⚠ {changerError}</div>
-              )}
-
-              {changerStatus === "ready" && changerResultUrl && (
-                <div className="space-y-1">
-                  <div className="text-[11px] text-secondary">✓ Reference updated for the selected voice.</div>
-                  <audio controls className="w-full" src={changerResultUrl} />
-                </div>
-              )}
-            </div>
-          )}
-
-          {elevenlabsStatus === "loading" && (
-            <div className="text-[11px] text-outline italic px-1 py-2">Loading your ElevenLabs voice library...</div>
-          )}
-
-          {elevenlabsStatus === "error" && (
-            <div className="text-[11px] text-red-400 px-1 py-2">
-              ⚠ {elevenlabsError}. Set <code className="font-mono">ELEVENLABS_API_KEY</code> in the backend .env.
-            </div>
-          )}
-
-          {elevenlabsStatus === "ready" && (
-            <>
+          {voxcpmCloneSource === "vietneu" ? (
+            <div>
               <select
-                value={elevenlabsVoiceId}
-                onChange={(e) => setElevenlabsVoiceId(e.target.value)}
+                value={selectedVoice}
+                onChange={(e) => setSelectedVoice(e.target.value)}
                 className="w-full text-xs bg-black/40 text-on-surface rounded-xl border border-outline-variant/60 p-2.5 outline-none focus:border-secondary transition-colors"
               >
-                {elevenlabsVoices.map((v) => (
+                {voices.map((v) => (
                   <option key={v.id} value={v.id} className="bg-neutral-900 text-white">
-                    🗣️ {v.name}{v.category ? ` (${v.category})` : ""}
+                    🎙️ {v.name}
                   </option>
                 ))}
               </select>
-              {selectedElevenlabsVoice?.preview_url && (
-                <audio controls className="w-full mt-2" src={selectedElevenlabsVoice.preview_url} />
-              )}
               <p className="text-[10px] text-outline mt-1.5 italic">
-                VoxCPM clones this voice's timbre from a VieNeu Vietnamese sample re-voiced via ElevenLabs, then speaks your text locally.
+                VoxCPM clones this VieNeu preset's own voice directly -- no ElevenLabs API calls, fully local and free.
               </p>
+            </div>
+          ) : (
+            <>
+              <div className="flex items-center justify-between mb-1">
+                <label className="block font-label text-[10px] text-outline">
+                  ELEVENLABS VOICE (VOXCPM REFERENCE)
+                </label>
+                <button
+                  type="button"
+                  onClick={() => setShowVoiceChanger((s) => !s)}
+                  className="text-[10px] font-label uppercase text-secondary hover:underline cursor-pointer"
+                >
+                  {showVoiceChanger ? "Cancel" : "+ Voice changer"}
+                </button>
+              </div>
+
+              {showVoiceChanger && (
+                <div className="mb-3 p-2.5 rounded-xl border border-outline-variant/60 bg-black/30 space-y-2">
+                  <p className="text-[10px] text-outline italic">
+                    Upload a recording of any speech. It will be converted into the voice selected below (same words/timing, different voice) and used as a richer VoxCPM cloning reference.
+                  </p>
+                  <input
+                    type="file"
+                    accept="audio/*"
+                    onChange={(e) => setChangerFile(e.target.files?.[0] || null)}
+                    className="w-full text-[11px] text-outline file:mr-2 file:py-1.5 file:px-2.5 file:rounded-lg file:border-0 file:bg-secondary file:text-black file:text-[10px] file:font-label file:uppercase file:cursor-pointer cursor-pointer"
+                  />
+                  <button
+                    type="button"
+                    onClick={handleConvertVoice}
+                    disabled={!changerFile || !elevenlabsVoiceId || changerStatus === "converting"}
+                    className="w-full text-[10px] font-label uppercase py-2 rounded-lg border border-secondary/60 text-secondary hover:bg-secondary/10 disabled:opacity-40 disabled:cursor-not-allowed transition-colors cursor-pointer"
+                  >
+                    {changerStatus === "converting" ? "Converting..." : "Convert & use as reference"}
+                  </button>
+
+                  {changerStatus === "error" && (
+                    <div className="text-[11px] text-red-400">⚠ {changerError}</div>
+                  )}
+
+                  {changerStatus === "ready" && changerResultUrl && (
+                    <div className="space-y-1">
+                      <div className="text-[11px] text-secondary">✓ Reference updated for the selected voice.</div>
+                      <audio controls className="w-full" src={changerResultUrl} />
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {elevenlabsStatus === "loading" && (
+                <div className="text-[11px] text-outline italic px-1 py-2">Loading your ElevenLabs voice library...</div>
+              )}
+
+              {elevenlabsStatus === "error" && (
+                <div className="text-[11px] text-red-400 px-1 py-2">
+                  ⚠ {elevenlabsError}. Set <code className="font-mono">ELEVENLABS_API_KEY</code> in the backend .env.
+                </div>
+              )}
+
+              {elevenlabsStatus === "ready" && (
+                <>
+                  <select
+                    value={elevenlabsVoiceId}
+                    onChange={(e) => setElevenlabsVoiceId(e.target.value)}
+                    className="w-full text-xs bg-black/40 text-on-surface rounded-xl border border-outline-variant/60 p-2.5 outline-none focus:border-secondary transition-colors"
+                  >
+                    {elevenlabsVoices.map((v) => (
+                      <option key={v.id} value={v.id} className="bg-neutral-900 text-white">
+                        🗣️ {v.name}{v.category ? ` (${v.category})` : ""}
+                      </option>
+                    ))}
+                  </select>
+                  {selectedElevenlabsVoice?.preview_url && (
+                    <audio controls className="w-full mt-2" src={selectedElevenlabsVoice.preview_url} />
+                  )}
+                  <p className="text-[10px] text-outline mt-1.5 italic">
+                    VoxCPM clones this voice's timbre from a VieNeu Vietnamese sample re-voiced via ElevenLabs, then speaks your text locally.
+                  </p>
+                </>
+              )}
             </>
           )}
         </div>

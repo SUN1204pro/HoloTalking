@@ -256,7 +256,10 @@ def get_voxcpm():
     global _voxcpm_instance
     if _voxcpm_instance is None:
         print("[VoxCPM] Loading model for the first time (this can take a while)...")
-        _voxcpm_instance = VoxCPM.from_pretrained("openbmb/VoxCPM2")
+        # load_denoiser=False: skips loading/warming the zipenhancer ANS denoiser model,
+        # which only runs CPU inference (no MPS support) and adds a multi-hour one-time
+        # warm-up cost. We never pass denoise=True to generate(), so it's dead weight.
+        _voxcpm_instance = VoxCPM.from_pretrained("openbmb/VoxCPM2", load_denoiser=False)
     return _voxcpm_instance
 
 
@@ -318,6 +321,25 @@ def get_or_create_reference_audio(voice_id: str, api_key: str = None) -> str:
     return ref_path
 
 
+def get_or_create_vieneu_reference_audio(voice_name: str) -> str:
+    """Builds the VoxCPM voice-cloning reference directly from a VieNeu preset voice's
+    own timbre -- no ElevenLabs involved, fully local and free. Cached on disk so each
+    preset is only synthesized once; delete the cached file under custom_voices/ to
+    force a refresh."""
+    if not VIENEU_AVAILABLE:
+        raise RuntimeError("ViEneu TTS library is not installed or available.")
+    safe_name = re.sub(r'[^a-zA-Z0-9_-]', '_', voice_name)
+    ref_path = os.path.join(CUSTOM_VOICE_CACHE_DIR, f"vietneu_{safe_name}.wav")
+    if os.path.exists(ref_path):
+        return ref_path
+
+    tts = Vieneu()
+    voice = tts.get_preset_voice(voice_name)
+    audio_data = tts.infer(text=REFERENCE_TEXT_VI, voice=voice)
+    tts.save(audio_data, ref_path)
+    return ref_path
+
+
 def synthesize_tts(
     text: str,
     audio_path: str,
@@ -328,14 +350,19 @@ def synthesize_tts(
     elevenlabs_api_key: str = None,
     voice_style: str = None,
 ):
-    """Synthesizes `text` to `audio_path`, dispatching to VieNeu presets or VoxCPM,
-    the latter cloning a custom ElevenLabs voice reference."""
+    """Synthesizes `text` to `audio_path`, dispatching to VieNeu presets or VoxCPM.
+    VoxCPM clones its voice from either an ElevenLabs voice (elevenlabs_voice_id set)
+    or, with no ElevenLabs involved at all, directly from a VieNeu preset's own timbre
+    (voice_name set instead) -- fully local and free."""
     if tts_engine == "voxcpm":
         if not VOXCPM_AVAILABLE:
             raise RuntimeError("voxcpm package is not installed.")
-        if not elevenlabs_voice_id:
-            raise RuntimeError("Select an ElevenLabs voice to use as the VoxCPM reference.")
-        ref_path = get_or_create_reference_audio(elevenlabs_voice_id, elevenlabs_api_key)
+        if elevenlabs_voice_id:
+            ref_path = get_or_create_reference_audio(elevenlabs_voice_id, elevenlabs_api_key)
+        elif voice_name:
+            ref_path = get_or_create_vieneu_reference_audio(voice_name)
+        else:
+            raise RuntimeError("Select an ElevenLabs voice or a VieNeu preset to use as the VoxCPM reference.")
         model = get_voxcpm()
         # VoxCPM follows a natural-language style/delivery instruction prepended in
         # parentheses ahead of the actual line, e.g. "(deep, solemn, regal tone) <text>".
