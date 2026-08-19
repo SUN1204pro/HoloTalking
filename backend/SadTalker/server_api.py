@@ -259,7 +259,12 @@ def get_voxcpm():
         # load_denoiser=False: skips loading/warming the zipenhancer ANS denoiser model,
         # which only runs CPU inference (no MPS support) and adds a multi-hour one-time
         # warm-up cost. We never pass denoise=True to generate(), so it's dead weight.
-        _voxcpm_instance = VoxCPM.from_pretrained("openbmb/VoxCPM2", load_denoiser=False)
+        #
+        # device="cpu": VoxCPM's autoregressive-plus-diffusion decode loop calls many
+        # small sequential ops per step, which on Apple's MPS backend runs ~40-70x
+        # SLOWER than plain CPU (measured: ~35-57s/step on MPS vs ~0.8s/step on CPU) --
+        # the opposite of SadTalker's large batched conv ops, which do benefit from MPS.
+        _voxcpm_instance = VoxCPM.from_pretrained("openbmb/VoxCPM2", load_denoiser=False, device="cpu")
     return _voxcpm_instance
 
 
