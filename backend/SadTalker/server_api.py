@@ -429,7 +429,10 @@ _stream_state = {"active": False, "target_ip": None, "port": None}
 
 def _build_freeze_video(image_path: str, duration: float = 3.0):
     """Encode the current avatar image into a short MP4 so the holofan link can
-    push a frozen frame while SadTalker is generating a new talking clip."""
+    push a frozen frame while SadTalker is generating a new talking clip. Also
+    broadcasts it immediately to every connected socket client, so viewers see
+    the frozen avatar right away instead of the previous talking clip lingering
+    until the next one finishes rendering."""
     if not image_path or not os.path.exists(image_path):
         return
     try:
@@ -439,11 +442,12 @@ def _build_freeze_video(image_path: str, duration: float = 3.0):
             f'-t {duration} -vf "format=yuv420p" -c:v libx264 -movflags +faststart "{FREEZE_VIDEO_PATH}"'
         )
         subprocess.run(cmd, shell=True, check=True)
+        socket_video_server.broadcast_video_update(FREEZE_VIDEO_PATH)
     except Exception as e:
         print(f"[freeze video] Failed to build freeze clip: {e}")
 
 
-def _direct_send_file(file_path: str, ip: str, port: int, timeout: float = 6.0) -> bool:
+def _direct_send_file(file_path: str, ip: str, port: int, timeout: float = 3.0) -> bool:
     if not os.path.exists(file_path) or os.path.getsize(file_path) == 0:
         return False
     file_size = os.path.getsize(file_path)
@@ -709,7 +713,16 @@ async def render_talking_clip(
 ) -> str:
     """Runs SadTalker (+ optional Wav2Lip refinement) on an already-synthesized audio
     clip and returns the path to the final video. Shared by /generate and
-    /generate_stream so a multi-sentence script can render clip-by-clip."""
+    /generate_stream so a multi-sentence script can render clip-by-clip.
+
+    Deliberately shells out to a fresh `python inference.py` per call rather than
+    keeping the models warm in-process: on this machine's MPS backend, warm
+    in-process inference measured ~2x slower per frame than a fresh subprocess
+    (1.8-1.9s/frame vs 3.3-3.4s/frame, reproduced multiple times, independent of
+    threading) -- an MPS/Metal allocator quirk where a long-lived process doing
+    repeated GPU work is slower than a short-lived one with a clean allocator
+    state. The ~10-20s fixed subprocess-start cost is smaller than that penalty
+    for any non-trivial audio length."""
     global _is_generating
     python_exe = sys.executable
     cmd_parts = [
@@ -1343,7 +1356,7 @@ async def push_video_to_client(
         clean_ip = target_ip.strip()
         try:
             s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            s.settimeout(6.0)
+            s.settimeout(3.0)
             s.connect((clean_ip, port))
             
             # Send 8-byte header
@@ -1438,7 +1451,10 @@ async def push_stream_status():
         }
 
 
-
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run("server_api:app", host="0.0.0.0", port=8000, reload=True)
+    # reload=True spawns a reloader + worker process pair that both attempt to bind
+    # the in-process holofan socket on port 9999 -- the second bind fails and, in
+    # this environment, brings down the whole process tree rather than just logging
+    # a harmless error. A live/production server should run without --reload anyway.
+    uvicorn.run("server_api:app", host="0.0.0.0", port=8000, reload=False)
