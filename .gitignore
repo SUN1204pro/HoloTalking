@@ -29,9 +29,11 @@ backend/SadTalker/examples/source_image/*hcmus*/
 result/
 backend/*_rembg.png
 backend/*.raw.png
+received_holofan_video.mp4
 *.pth
 *.pt
 *.tar.gz
+*.log
 
 # Frontend Build & Node Modules
 node_modules/
