@@ -534,7 +534,12 @@ def _warmup_models():
             _step("vieneu", get_vieneu)
         if "voxcpm" in targets and VOXCPM_AVAILABLE:
             _step("voxcpm", get_voxcpm)
-        if "whisper" in targets and (provider == "claude" or "whisper" in (os.environ.get("WARMUP", "") or "")):
+        _need_whisper = (
+            provider == "claude"
+            or os.environ.get("GEMINI_STT_FIRST", "").strip() in ("1", "true", "yes")
+            or "whisper" in (os.environ.get("WARMUP", "") or "")
+        )
+        if "whisper" in targets and _need_whisper:
             _step("whisper", _get_whisper)
         if "provider" in targets and provider == "claude":
             _step("claude-client", lambda: _get_anthropic())
@@ -1659,6 +1664,20 @@ def generate_gemini_response(user_message: str = None, audio_bytes: bytes = None
                 print("[Whisper] empty transcript, returning fallback ' '")
                 return " "
             print(f"[Whisper] Transcribed: {user_text}")
+        elif os.environ.get("GEMINI_STT_FIRST", "").strip() in ("1", "true", "yes"):
+            # Transcribe locally (fast on GPU) and send only TEXT to Gemini -- a
+            # ~100-byte request instead of a multi-hundred-KB audio upload. Faster
+            # and far more reliable on a weak connection. Also gives a real
+            # transcript for the memory log.
+            try:
+                user_text = _transcribe_audio(audio_bytes)
+            except Exception as e:
+                print("[STT] transcription failed:", e)
+                user_text = ""
+            if not user_text:
+                print("[STT] empty transcript, returning fallback ' '")
+                return " "
+            print(f"[STT] Transcribed: {user_text}")
         else:
             send_audio = audio_bytes  # Gemini handles audio natively
             if os.environ.get("TRANSCRIBE_FOR_MEMORY", "").strip() in ("1", "true", "yes"):
