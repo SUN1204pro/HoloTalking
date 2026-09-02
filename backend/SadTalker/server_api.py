@@ -1337,10 +1337,13 @@ def _get_anthropic(api_key: str = None):
     except ImportError:
         print("[Claude] `anthropic` package not installed -- run: pip install anthropic")
         return None
+    # Identity-linked / workspace-scoped API keys require the workspace id as a header.
+    ws = os.environ.get("ANTHROPIC_WORKSPACE_ID", "").strip()
+    extra = {"default_headers": {"anthropic-workspace-id": ws}} if ws else {}
     if passed:
-        return anthropic.Anthropic(api_key=passed)
+        return anthropic.Anthropic(api_key=passed, **extra)
     if _anthropic_client is None:
-        _anthropic_client = anthropic.Anthropic(api_key=env_key)
+        _anthropic_client = anthropic.Anthropic(api_key=env_key, **extra)
     return _anthropic_client
 
 
