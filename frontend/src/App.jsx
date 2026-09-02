@@ -1,4 +1,4 @@
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
 import Sidebar from "./components/Sidebar/Sidebar";
 import VideoArea from "./components/VideoArea/VideoArea";
 import { API_BASE } from "./api";
@@ -72,7 +72,31 @@ function App() {
   const clipQueueRef = useRef([]);
   const streamRef = useRef({ total: 1, currentIndex: -1, waitingForNext: false });
 
+  // Poll the backend warm-up state. While it's setting up models, block the UI.
+  const [serverWarming, setServerWarming] = useState(true);
+  const [warmupStage, setWarmupStage] = useState("starting");
+  useEffect(() => {
+    let stop = false;
+    const check = async () => {
+      try {
+        const res = await fetch(`${API_BASE}/api/health`);
+        const data = await res.json();
+        if (stop) return;
+        setServerWarming(!!data.warming_up);
+        setWarmupStage(data.warmup_stage || "");
+        if (!data.warming_up) return; // done polling
+      } catch {
+        if (stop) return;
+        setServerWarming(true);
+      }
+      if (!stop) setTimeout(check, 2000);
+    };
+    check();
+    return () => { stop = true; };
+  }, []);
+
   const isGenerateReady =
+    !serverWarming &&
     selectedImage &&
     ((activeTab === "TEXT" && scriptText.trim().length >= 3) ||
       ((activeTab === "AUDIO" || activeTab === "LIVE_MIC") && audioFile !== null));
@@ -355,6 +379,15 @@ function App() {
   return (
     <div className="bg-background text-on-surface font-body min-h-screen relative overflow-x-hidden">
       <div className="film-grain"></div>
+
+      {serverWarming && (
+        <div className="fixed inset-0 z-50 flex flex-col items-center justify-center bg-black/80 backdrop-blur-sm">
+          <span className="material-symbols-outlined text-secondary text-5xl animate-spin mb-4">progress_activity</span>
+          <p className="text-secondary font-label tracking-widest text-sm uppercase">Setting up models…</p>
+          <p className="text-outline text-xs mt-1">{warmupStage}</p>
+          <p className="text-outline/70 text-[11px] mt-3">First start only — this won't happen again while the server runs.</p>
+        </div>
+      )}
 
       <main className="relative z-10 flex min-h-screen max-w-[1440px] mx-auto px-10 py-12 gap-12 items-start">
         <Sidebar

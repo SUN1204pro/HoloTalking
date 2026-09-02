@@ -475,47 +475,77 @@ _stream_lock = threading.Lock()
 _stream_state = {"active": False, "target_ip": None, "port": None}
 
 
+# Warm-up / readiness. While `_warm_state["ready"]` is False the generation
+# endpoints return 503 so the frontend can show a "setting up" screen and block
+# input instead of triggering half-loaded models.
+_warm_state = {"ready": False, "stage": "starting", "error": None}
+
+
 @app.on_event("startup")
 def _warmup_models():
-    """Load the heavy models once, at server start, so the first user request
-    doesn't eat the 'Loading model for the first time...' stall.
+    """Load every heavy model once, at server start, so no request ever pays the
+    first-load cost.
 
-    WARMUP=off        -> skip entirely (lazy load on first use, old behaviour)
-    WARMUP=vieneu     -> default: just the default TTS engine
-    WARMUP=vieneu,voxcpm,whisper,claude  -> comma list of what to preload
+    WARMUP=all (default)  -> sadtalker + vieneu + voxcpm + whisper + provider
+    WARMUP=off            -> load lazily on first use, and don't gate requests
+    WARMUP=sadtalker,vieneu -> explicit comma list
 
-    Runs in a background thread so uvicorn still reports "startup complete" fast.
-    Note: SadTalker itself can't be warmed here -- it runs as a fresh subprocess
-    per request by design."""
-    want = os.environ.get("WARMUP", "vieneu").strip().lower()
+    Runs in a background thread; requests are gated (503) until it finishes."""
+    want = os.environ.get("WARMUP", "all").strip().lower()
     if want in ("off", "0", "none", "false"):
+        _warm_state["ready"] = True
+        _warm_state["stage"] = "disabled"
         return
-    targets = {t.strip() for t in want.split(",") if t.strip()}
+    if want in ("all", "1", "true", "yes"):
+        targets = {"sadtalker", "vieneu", "voxcpm", "whisper", "provider"}
+    else:
+        targets = {t.strip() for t in want.split(",") if t.strip()}
+
+    provider = os.environ.get("AI_PROVIDER", "gemini").strip().lower()
+
+    def _step(name, fn):
+        _warm_state["stage"] = name
+        print(f"[warmup] {name}...")
+        try:
+            fn()
+        except Exception as e:
+            print(f"[warmup] {name} failed: {e}")
+            _warm_state["error"] = f"{name}: {e}"
 
     def _run():
+        if "sadtalker" in targets and os.environ.get("SADTALKER_WARM", "1") not in ("0", "false", "no"):
+            def _load_sad():
+                import sadtalker_engine
+                sadtalker_engine.warmup(os.environ.get("SADTALKER_PREPROCESS", "crop"))
+            _step("sadtalker", _load_sad)
         if "vieneu" in targets and VIENEU_AVAILABLE:
-            try:
-                get_vieneu()
-            except Exception as e:
-                print("[warmup] VieNeu failed:", e)
+            _step("vieneu", get_vieneu)
         if "voxcpm" in targets and VOXCPM_AVAILABLE:
-            try:
-                get_voxcpm()
-            except Exception as e:
-                print("[warmup] VoxCPM failed:", e)
-        if "whisper" in targets:
-            try:
-                _get_whisper()
-            except Exception as e:
-                print("[warmup] Whisper failed:", e)
-        if "claude" in targets:
-            try:
-                _get_anthropic()
-            except Exception as e:
-                print("[warmup] Claude client failed:", e)
-        print(f"[warmup] done ({', '.join(sorted(targets))})")
+            _step("voxcpm", get_voxcpm)
+        if "whisper" in targets and (provider == "claude" or "whisper" in (os.environ.get("WARMUP", "") or "")):
+            _step("whisper", _get_whisper)
+        if "provider" in targets and provider == "claude":
+            _step("claude-client", lambda: _get_anthropic())
+        _warm_state["stage"] = "ready"
+        _warm_state["ready"] = True
+        print("[warmup] done -- server ready")
 
     threading.Thread(target=_run, daemon=True).start()
+
+
+_GATED_PREFIXES = ("/generate", "/agent/chat", "/preprocess_avatar", "/api/custom_voice")
+
+
+@app.middleware("http")
+async def _warmup_gate(request, call_next):
+    if not _warm_state["ready"] and request.url.path.startswith(_GATED_PREFIXES):
+        from fastapi.responses import JSONResponse
+        return JSONResponse(
+            status_code=503,
+            content={"detail": f"Server is warming up ({_warm_state['stage']}). Try again in a moment.",
+                     "warming_up": True, "stage": _warm_state["stage"]},
+        )
+    return await call_next(request)
 
 
 def _build_freeze_video(image_path: str, duration: float = 3.0):
@@ -606,6 +636,9 @@ def health_check():
         "status": "online",
         "engine": "OpenTalking + SadTalker + ViEneu",
         "vieneu_available": VIENEU_AVAILABLE,
+        "warming_up": not _warm_state["ready"],
+        "warmup_stage": _warm_state["stage"],
+        "warmup_error": _warm_state["error"],
         "timestamp": datetime.now().isoformat()
     }
 
@@ -881,6 +914,29 @@ async def render_talking_clip(
         if not os.path.exists(final_video_path):
             raise HTTPException(status_code=500, detail="Wav2Lip-only generation failed (check checkpoints/wav2lip_gan.pth and face detection).")
         return final_video_path
+
+    # Warm in-process path (default): models stay loaded, so a request skips the
+    # ~10-20s per-call checkpoint reload the subprocess path pays every time.
+    # SADTALKER_WARM=0 forces the old fresh-subprocess behaviour.
+    if os.environ.get("SADTALKER_WARM", "1") not in ("0", "false", "no"):
+        try:
+            import sadtalker_engine
+            _is_generating = True
+            try:
+                final_video_path = await asyncio.to_thread(
+                    sadtalker_engine.generate,
+                    cached_avatar_path, audio_path, run_dir, clip_name,
+                    preprocess=preprocess, still=still,
+                    expression_scale=expression_scale, pose_style=pose_style,
+                    enhancer=enhancer,
+                )
+            finally:
+                _is_generating = False
+            if lipsync_engine == "wav2lip":
+                process_wav2lip(final_video_path, audio_path, final_video_path)
+            return final_video_path
+        except Exception as e:
+            print(f"[sadtalker warm] failed ({e}); falling back to subprocess for this request")
 
     python_exe = sys.executable
     cmd_parts = [
