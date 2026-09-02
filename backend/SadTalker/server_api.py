@@ -1015,14 +1015,20 @@ async def generate_video(
     audio_path = os.path.join(run_dir, "input_audio.wav")
     final_speak_text = text or "Xin chào."
 
-    # ONLY live / audio mode can use Gemini
-    if inputType != "audio":
-        use_gemini = False
-
     if inputType == "text":
         if not text or not text.strip():
             raise HTTPException(status_code=400, detail="Text input is empty.")
-        final_speak_text = text.strip()
+        if use_gemini:
+            try:
+                final_speak_text = generate_gemini_response(
+                    user_message=text.strip(), persona=persona, api_key=api_key,
+                    session_id=session_id
+                )
+            except Exception as e:
+                print("AI text reply failed:", e)
+                final_speak_text = text.strip()
+        else:
+            final_speak_text = text.strip()
     else:
         if not audio:
             raise HTTPException(status_code=400, detail="Audio file missing.")
@@ -1202,9 +1208,6 @@ async def generate_video_stream(
     run_dir = os.path.join("temp_files", f"stream_run_{timestamp}")
     os.makedirs(run_dir, exist_ok=True)
 
-    if inputType != "audio":
-        use_gemini = False
-
     # 1. Resolve what text (if any) will be spoken, and the avatar image, up front --
     # both are needed before any per-sentence work can start.
     final_speak_text = None
@@ -1212,7 +1215,19 @@ async def generate_video_stream(
     if inputType == "text":
         if not text or not text.strip():
             raise HTTPException(status_code=400, detail="Text input is empty.")
-        final_speak_text = text.strip()
+        if use_gemini:
+            # Chat mode: the typed text is a message to the AI; the avatar speaks
+            # the AI's reply (with per-session memory), not the text verbatim.
+            try:
+                final_speak_text = generate_gemini_response(
+                    user_message=text.strip(), persona=persona, api_key=api_key,
+                    session_id=session_id
+                )
+            except Exception as e:
+                print("AI text reply failed:", e)
+                final_speak_text = text.strip()
+        else:
+            final_speak_text = text.strip()
     else:
         if not audio:
             raise HTTPException(status_code=400, detail="Audio file missing.")

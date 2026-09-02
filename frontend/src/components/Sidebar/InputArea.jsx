@@ -475,15 +475,50 @@ function InputArea({
             customVoiceRef={customVoiceRef} setCustomVoiceRef={setCustomVoiceRef}
           />
 
+          {/* AI chat toggle for text */}
+          <div className="p-3 bg-black/30 border border-outline-variant/40 rounded-xl">
+            <div className="flex items-center justify-between">
+              <label htmlFor="text-ai-toggle" className="flex items-center gap-2 text-xs font-label text-secondary cursor-pointer bronze-glow">
+                <span>✨ AI Reply (chat, remembers)</span>
+              </label>
+              <input
+                id="text-ai-toggle"
+                type="checkbox"
+                checked={useGemini}
+                onChange={(e) => setUseGemini(e.target.checked)}
+                className="w-4 h-4 accent-amber-400 cursor-pointer"
+              />
+            </div>
+            {useGemini && (
+              <div className="mt-2.5 flex flex-col gap-2">
+                <input
+                  type="text"
+                  value={persona}
+                  onChange={(e) => setPersona(e.target.value)}
+                  placeholder="Character Persona (e.g. Vua Lý Thái Tổ...)"
+                  className="w-full text-xs bg-black/60 rounded-lg border border-outline-variant/50 p-2 outline-none focus:border-secondary text-on-surface placeholder:text-outline/70"
+                />
+                <div className="flex items-center justify-between">
+                  <span className="text-[10px] text-outline italic">Type a message; the avatar speaks the AI's reply.</span>
+                  <button type="button" onClick={clearConversation} className="text-[10px] font-label uppercase text-red-400 hover:underline cursor-pointer">
+                    Clear memory
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+
           {/* Text script area */}
           <div>
             <label className="block font-label text-[10px] text-outline mb-1">
-              TEXT SCRIPT TO SPEAK
+              {useGemini ? "MESSAGE TO THE AI" : "TEXT SCRIPT TO SPEAK"}
             </label>
             <textarea
               value={scriptText}
               onChange={(e) => setScriptText(e.target.value)}
-              placeholder="Enter the exact text script for the historical character to speak..."
+              placeholder={useGemini
+                ? "Ask or say something; the avatar replies as the AI..."
+                : "Enter the exact text script for the historical character to speak..."}
               className="w-full min-h-[90px] text-xs bg-black/40 rounded-xl border border-outline-variant/60 p-3 outline-none focus:border-secondary resize-none transition-colors custom-scrollbar"
             />
           </div>

@@ -247,7 +247,8 @@ function App() {
         formData.append("inputType", "text");
         formData.append("text", scriptText);
         formData.append("voice_name", selectedVoice);
-        formData.append("use_gemini", "false");
+        formData.append("use_gemini", useGemini ? "true" : "false");
+        if (useGemini && persona.trim()) formData.append("persona", persona.trim());
       } else {
         formData.append("inputType", "audio");
         formData.append("audio", targetAudio);
