@@ -1395,72 +1395,68 @@ def clear_history(session_id: str):
         os.remove(path)
 
 
-def generate_gemini_response(user_message: str = None, audio_bytes: bytes = None, mime_type: str = "audio/wav", persona: str = None, history_json: str = None, api_key: str = None, session_id: str = None) -> str:
-    """Generate the avatar's reply with Claude (Anthropic). Name kept for call-site
-    compatibility. Audio input is transcribed locally with Whisper first, because
-    Claude has no audio input. Set CLAUDE_MODEL to override the model
-    (default claude-opus-5); set CLAUDE_EFFORT to low|medium|high (default low)."""
-    import json
+def _gemini_reply(system_instruction, history_messages, user_text, audio_bytes, mime_type, api_key):
+    """Original Gemini path. history_messages is a neutral [{role,content}] list."""
+    import json, base64
+    key = (api_key and api_key.strip()) or os.environ.get("GEMINI_API_KEY", "").strip()
+    if not key:
+        print("[Gemini] No GEMINI_API_KEY configured, returning fallback ' '")
+        return " "
+
+    contents = []
+    for m in history_messages:
+        contents.append({
+            "role": "model" if m["role"] == "assistant" else "user",
+            "parts": [{"text": m["content"]}],
+        })
+    if audio_bytes:
+        contents.append({"role": "user", "parts": [
+            {"inline_data": {"mime_type": mime_type, "data": base64.b64encode(audio_bytes).decode("utf-8")}},
+            {"text": "Hãy lắng nghe câu hỏi/lời nói giọng nói này của người dùng và trả lời bằng văn bản tiếng Việt tự nhiên, cô đọng."},
+        ]})
+    else:
+        contents.append({"role": "user", "parts": [{"text": user_text or "Xin chào nhân vật AI."}]})
+
+    models_to_try = ["gemini-flash-latest", "gemini-2.5-flash", "gemini-2.5-flash-lite"]
+    base_cfg = {"maxOutputTokens": 2048, "temperature": 0.7}
+    for model in models_to_try:
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={key}"
+        res = None
+        for cfg in ({**base_cfg, "thinkingConfig": {"thinkingBudget": 0}}, base_cfg):
+            payload = {"contents": contents, "systemInstruction": {"parts": [{"text": system_instruction}]}, "generationConfig": cfg}
+            try:
+                res = requests.post(url, json=payload, headers={"Content-Type": "application/json"}, timeout=60)
+            except Exception as e:
+                print(f"[Gemini {model} failed]:", e); res = None; break
+            if res.status_code == 400 and "thinkingConfig" in cfg:
+                continue
+            break
+        if res is None:
+            continue
+        try:
+            if res.status_code == 200:
+                data = res.json()
+                for cand in data.get("candidates", []):
+                    parts = cand.get("content", {}).get("parts", [])
+                    txt = " ".join(p.get("text", "").strip() for p in parts if isinstance(p, dict) and p.get("text")).strip()
+                    if txt:
+                        print(f"[Gemini Success via {model}]: {txt}")
+                        return txt
+            else:
+                print(f"[Gemini {model} HTTP {res.status_code}]: {res.text[:200]}")
+        except Exception as e:
+            print(f"[Gemini {model} parse failed]:", e)
+    print("[Gemini] No text returned. Falling back to ' '")
+    return " "
+
+
+def _claude_reply(system_instruction, history_messages, user_text, api_key):
     client = _get_anthropic(api_key)
     if client is None:
         print("[Claude] No ANTHROPIC_API_KEY / CLAUDE_API_KEY configured, returning fallback ' '")
         return " "
-
-    system_instruction = (
-        "Bạn là một nhân vật AI đại diện ảo (Avatar) thông minh, sinh động, nói tiếng Việt. "
-        "Hãy trả lời tự nhiên, thân thiện và cô đọng (tốt nhất từ 2-4 câu) để phù hợp cho nhân vật nói chuyện trong clip video ngắn."
-    )
-    if persona and persona.strip():
-        system_instruction += f"\n\nVai trò / Tính cách nhân vật của bạn: {persona.strip()}"
-
-    if audio_bytes:
-        try:
-            user_text = _transcribe_audio(audio_bytes)
-        except Exception as e:
-            print("[Whisper] transcription failed:", e)
-            user_text = ""
-        if not user_text:
-            print("[Whisper] empty transcript, returning fallback ' '")
-            return " "
-        print(f"[Whisper] Transcribed: {user_text}")
-    elif user_message and user_message.strip():
-        user_text = user_message.strip()
-    else:
-        user_text = "Xin chào nhân vật AI."
-
-    messages = []
-
-    # Persistent per-session memory takes priority: the avatar remembers the
-    # whole conversation across turns and restarts.
-    if session_id:
-        stored = load_history(session_id)
-        try:
-            cap = int(os.environ.get("CLAUDE_HISTORY_TURNS", "20"))
-        except ValueError:
-            cap = 20
-        for m in stored[-cap:]:
-            if isinstance(m, dict) and m.get("role") in ("user", "assistant") and m.get("content"):
-                messages.append({"role": m["role"], "content": m["content"]})
-    elif history_json:
-        try:
-            parsed = json.loads(history_json)
-            for m in (parsed if isinstance(parsed, list) else []):
-                if not isinstance(m, dict):
-                    continue
-                role = m.get("role")
-                if role == "model":
-                    role = "assistant"
-                if role not in ("user", "assistant"):
-                    continue
-                content = m.get("content")
-                if content is None and isinstance(m.get("parts"), list):
-                    content = " ".join(p.get("text", "") for p in m["parts"] if isinstance(p, dict)).strip()
-                if content:
-                    messages.append({"role": role, "content": content})
-        except Exception as e:
-            print("Error parsing conversation history:", e)
-    messages.append({"role": "user", "content": user_text})
-
+    messages = [{"role": m["role"], "content": m["content"]} for m in history_messages]
+    messages.append({"role": "user", "content": user_text or "Xin chào nhân vật AI."})
     model = os.environ.get("CLAUDE_MODEL", "claude-opus-5")
     effort = os.environ.get("CLAUDE_EFFORT", "low")
     try:
@@ -1476,17 +1472,93 @@ def generate_gemini_response(user_message: str = None, audio_bytes: bytes = None
         text = "".join(b.text for b in resp.content if getattr(b, "type", None) == "text").strip()
         if text:
             print(f"[Claude Success via {model}]: {text}")
-            if session_id:
-                append_history(session_id, user_text, text)
             return text
         print(f"[Claude {model}] empty response (stop_reason={getattr(resp, 'stop_reason', None)})")
     except anthropic.APIStatusError as e:
         print(f"[Claude {model} API error {e.status_code}]: {getattr(e, 'message', str(e))}")
     except Exception as e:
         print("[Claude call failed]:", e)
-
     print("[Claude] No text returned. Falling back to ' '")
     return " "
+
+
+def generate_gemini_response(user_message: str = None, audio_bytes: bytes = None, mime_type: str = "audio/wav", persona: str = None, history_json: str = None, api_key: str = None, session_id: str = None) -> str:
+    """Generate the avatar's reply. AI_PROVIDER=gemini (default) or claude.
+    Gemini takes audio natively; Claude has no audio input, so audio is transcribed
+    locally with Whisper first. Per-session conversation memory works with both."""
+    import json
+    provider = os.environ.get("AI_PROVIDER", "gemini").strip().lower()
+
+    system_instruction = (
+        "Bạn là một nhân vật AI đại diện ảo (Avatar) thông minh, sinh động, nói tiếng Việt. "
+        "Hãy trả lời tự nhiên, thân thiện và cô đọng (tốt nhất từ 2-4 câu) để phù hợp cho nhân vật nói chuyện trong clip video ngắn."
+    )
+    if persona and persona.strip():
+        system_instruction += f"\n\nVai trò / Tính cách nhân vật của bạn: {persona.strip()}"
+
+    # Resolve the user's turn as text. Claude needs a transcript; Gemini can take
+    # the audio directly, but we still transcribe so the memory log has real text.
+    user_text = None
+    send_audio = None
+    if user_message and user_message.strip():
+        user_text = user_message.strip()
+    elif audio_bytes:
+        if provider == "claude":
+            try:
+                user_text = _transcribe_audio(audio_bytes)
+            except Exception as e:
+                print("[Whisper] transcription failed:", e)
+                user_text = ""
+            if not user_text:
+                print("[Whisper] empty transcript, returning fallback ' '")
+                return " "
+            print(f"[Whisper] Transcribed: {user_text}")
+        else:
+            send_audio = audio_bytes  # Gemini handles audio natively
+            if os.environ.get("TRANSCRIBE_FOR_MEMORY", "").strip() in ("1", "true", "yes"):
+                try:
+                    user_text = _transcribe_audio(audio_bytes) or "[tin nhắn thoại]"
+                except Exception:
+                    user_text = "[tin nhắn thoại]"
+            else:
+                user_text = "[tin nhắn thoại]"
+
+    # Load conversation memory (neutral [{role,content}] list).
+    history_messages = []
+    if session_id:
+        stored = load_history(session_id)
+        try:
+            cap = int(os.environ.get("CLAUDE_HISTORY_TURNS", "20"))
+        except ValueError:
+            cap = 20
+        for m in stored[-cap:]:
+            if isinstance(m, dict) and m.get("role") in ("user", "assistant") and m.get("content"):
+                history_messages.append({"role": m["role"], "content": m["content"]})
+    elif history_json:
+        try:
+            parsed = json.loads(history_json)
+            for m in (parsed if isinstance(parsed, list) else []):
+                if not isinstance(m, dict):
+                    continue
+                role = "assistant" if m.get("role") == "model" else m.get("role")
+                if role not in ("user", "assistant"):
+                    continue
+                content = m.get("content")
+                if content is None and isinstance(m.get("parts"), list):
+                    content = " ".join(p.get("text", "") for p in m["parts"] if isinstance(p, dict)).strip()
+                if content:
+                    history_messages.append({"role": role, "content": content})
+        except Exception as e:
+            print("Error parsing conversation history:", e)
+
+    if provider == "claude":
+        reply = _claude_reply(system_instruction, history_messages, user_text, api_key)
+    else:
+        reply = _gemini_reply(system_instruction, history_messages, user_text, send_audio, mime_type, api_key)
+
+    if reply and reply.strip() and session_id:
+        append_history(session_id, user_text or "[tin nhắn thoại]", reply)
+    return reply
 
 
 @app.post("/agent/chat")
