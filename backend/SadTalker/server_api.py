@@ -1364,29 +1364,52 @@ async def generate_video_stream(
     return StreamingResponse(event_stream(), media_type="text/event-stream")
 
 
+_whisper_pipe = None
+_whisper_engine = None            # "faster-whisper" | "transformers"
+_whisper_lock = threading.Lock()
+
+
 def _get_whisper():
-    """Lazily load a local Whisper ASR pipeline. Claude has no audio input, so
-    live-mic audio is transcribed here first, then the text is sent to Claude.
-    Override the model with WHISPER_MODEL (default openai/whisper-small)."""
-    global _whisper_pipe
+    """Lazily load a local Whisper ASR model. Two backends:
+
+      STT_ENGINE=faster-whisper (default if installed) -- CTranslate2, ~4x faster,
+          built-in VAD (also kills silence hallucinations). WHISPER_MODEL defaults
+          to "large-v3" (use "medium"/"small" for less VRAM/latency).
+      STT_ENGINE=transformers -- the HF pipeline fallback.
+
+    Only used on the Claude path; Gemini takes audio natively (no STT step)."""
+    global _whisper_pipe, _whisper_engine
     if _whisper_pipe is None:
         with _whisper_lock:
             if _whisper_pipe is None:
-                from transformers import pipeline
-                model_id = os.environ.get("WHISPER_MODEL", "openai/whisper-small")
                 device = _pick_tts_device()
-                print(f"[Whisper] Loading {model_id} on {device} for speech-to-text...")
+                want = os.environ.get("STT_ENGINE", "").strip().lower()
+                model_id = os.environ.get("WHISPER_MODEL", "")
+
+                if want != "transformers":
+                    try:
+                        from faster_whisper import WhisperModel
+                        name = model_id or "large-v3"
+                        ct2_dev = "cuda" if device == "cuda" else "cpu"
+                        ctype = "float16" if ct2_dev == "cuda" else "int8"
+                        print(f"[Whisper] faster-whisper {name} on {ct2_dev} ({ctype})...")
+                        _whisper_pipe = WhisperModel(name, device=ct2_dev, compute_type=ctype)
+                        _whisper_engine = "faster-whisper"
+                        return _whisper_pipe
+                    except ImportError:
+                        if want == "faster-whisper":
+                            raise
+                        print("[Whisper] faster-whisper not installed, using transformers pipeline")
+
+                from transformers import pipeline
+                name = model_id or "openai/whisper-small"
+                print(f"[Whisper] transformers {name} on {device}...")
                 _whisper_pipe = pipeline(
-                    "automatic-speech-recognition",
-                    model=model_id,
-                    device=0 if device == "cuda" else -1,
-                    chunk_length_s=30,
+                    "automatic-speech-recognition", model=name,
+                    device=0 if device == "cuda" else -1, chunk_length_s=30,
                 )
+                _whisper_engine = "transformers"
     return _whisper_pipe
-
-
-_whisper_pipe = None
-_whisper_lock = threading.Lock()
 
 
 _WHISPER_HALLUCINATIONS = (
@@ -1416,14 +1439,22 @@ def _transcribe_audio(audio_bytes: bytes) -> str:
         except Exception:
             pass
 
-        out = _get_whisper()(
-            tmp,
-            generate_kwargs={
-                "language": "vietnamese", "task": "transcribe",
-                "no_repeat_ngram_size": 3, "temperature": 0.0,
-            },
-        )
-        text = (out.get("text") or "").strip()
+        model = _get_whisper()
+        if _whisper_engine == "faster-whisper":
+            segments, _info = model.transcribe(
+                tmp, language="vi", beam_size=1, vad_filter=True,
+                vad_parameters={"min_silence_duration_ms": 500},
+            )
+            text = " ".join(s.text.strip() for s in segments).strip()
+        else:
+            out = model(
+                tmp,
+                generate_kwargs={
+                    "language": "vietnamese", "task": "transcribe",
+                    "no_repeat_ngram_size": 3, "temperature": 0.0,
+                },
+            )
+            text = (out.get("text") or "").strip()
         low = text.lower()
         if text and any(h in low for h in _WHISPER_HALLUCINATIONS):
             print(f"[Whisper] discarded hallucination: {text}")
