@@ -1,10 +1,14 @@
 """One-command Windows bridge: receive generated videos from the backend and
 auto-upload each one into the Holoscope desktop app.
 
-Run on the Windows PC that has Holoscope installed:
+Run on the Windows OR macOS machine that has Holoscope installed:
 
     pip install pyautogui pillow opencv-python
     python holofan_autopush.py 192.168.0.107        # <- backend LAN IP
+
+macOS only: System Settings -> Privacy & Security -> grant your terminal both
+"Accessibility" and "Screen Recording", or clicks and image search do nothing.
+Set HOLOSCOPE_WINDOW_HINT below to the exact app name shown in the menu bar.
 
 What it does:
   1. Connects to the backend's socket streamer (port 9999) and saves every
@@ -65,11 +69,24 @@ def _click_image(name, timeout=15, confidence=0.8):
 
 
 def _focus_holoscope():
+    if sys.platform == "darwin":
+        # macOS: focus via AppleScript (pygetwindow doesn't work here).
+        import subprocess
+        try:
+            subprocess.run(
+                ["osascript", "-e", f'tell application "{HOLOSCOPE_WINDOW_HINT}" to activate'],
+                check=True, capture_output=True,
+            )
+            time.sleep(1.0)
+            return True
+        except Exception as e:
+            print(f"[autopush] osascript focus failed: {e}")
+            return False
     try:
         wins = pyautogui.getWindowsWithTitle(HOLOSCOPE_WINDOW_HINT)
         if wins:
             w = wins[0]
-            if w.isMinimized:
+            if getattr(w, "isMinimized", False):
                 w.restore()
             w.activate()
             time.sleep(1.0)
