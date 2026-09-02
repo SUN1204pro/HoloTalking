@@ -28,6 +28,18 @@ try:
 except Exception:
     pass
 
+# FORCE_IPV4=1: make all outbound HTTP use IPv4 only. Fixes Gemini/other API calls
+# hanging until timeout on hosts that resolve AAAA records but have no working
+# IPv6 route (common cause of "Read timed out" when curl -4 works fine).
+if os.environ.get("FORCE_IPV4", "").strip() in ("1", "true", "yes"):
+    try:
+        import socket as _socket
+        import urllib3.util.connection as _u3c
+        _u3c.allowed_gai_family = lambda: _socket.AF_INET
+        print("[net] FORCE_IPV4 enabled -- outbound requests use IPv4 only")
+    except Exception as _e:
+        print("[net] FORCE_IPV4 requested but could not patch urllib3:", _e)
+
 # Base URL the browser (or an iPhone on the same Wi-Fi) uses to reach this server.
 # Defaults to localhost; set PUBLIC_BASE_URL=http://<mac-lan-ip>:8000 in .env so
 # generated video/image URLs are reachable from other devices.
