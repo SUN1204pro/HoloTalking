@@ -1389,16 +1389,46 @@ _whisper_pipe = None
 _whisper_lock = threading.Lock()
 
 
+_WHISPER_HALLUCINATIONS = (
+    "ghiền mì gõ", "hãy subscribe", "đăng ký kênh", "cảm ơn các bạn đã theo dõi",
+    "hẹn gặp lại các bạn", "ghiền mì",
+)
+
+
 def _transcribe_audio(audio_bytes: bytes) -> str:
     tmp = os.path.join("temp_files", f"stt_{uuid.uuid4().hex}.wav")
     os.makedirs("temp_files", exist_ok=True)
     try:
         with open(tmp, "wb") as f:
             f.write(audio_bytes)
+
+        # Silence / non-speech guard: Whisper hallucinates a fixed YouTube-outro
+        # phrase on quiet or empty audio. Skip transcription if the recording has
+        # almost no energy.
+        try:
+            import wave, audioop
+            with wave.open(tmp, "rb") as w:
+                frames = w.readframes(w.getnframes())
+                rms = audioop.rms(frames, w.getsampwidth()) if frames else 0
+            if rms < 120:
+                print(f"[Whisper] audio too quiet (rms={rms}), skipping")
+                return ""
+        except Exception:
+            pass
+
         out = _get_whisper()(
-            tmp, generate_kwargs={"language": "vietnamese", "task": "transcribe"}
+            tmp,
+            generate_kwargs={
+                "language": "vietnamese", "task": "transcribe",
+                "no_repeat_ngram_size": 3, "temperature": 0.0,
+            },
         )
-        return (out.get("text") or "").strip()
+        text = (out.get("text") or "").strip()
+        low = text.lower()
+        if text and any(h in low for h in _WHISPER_HALLUCINATIONS):
+            print(f"[Whisper] discarded hallucination: {text}")
+            return ""
+        return text
     finally:
         if os.path.exists(tmp):
             os.remove(tmp)
