@@ -29,3 +29,4 @@ safetensors>=0.3.1
 
 # Optional Vietnamese TTS Engine
 vieneu>=0.1.0
+anthropic>=0.40.0

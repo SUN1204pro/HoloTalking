@@ -1,6 +1,7 @@
 import { useState } from "react";
 import MainPlayer from "./MainPlayer";
 import RecentVideos from "./RecentVideos";
+import { API_BASE } from "../../api";
 
 function VideoArea({
   selectedImage, isGenerating, generatedVideoUrl, setGeneratedVideoUrl, isPlaying,
@@ -22,7 +23,7 @@ function VideoArea({
         formData.append("target_ip", targetIp.trim());
         formData.append("port", targetPort);
 
-        const res = await fetch("http://127.0.0.1:8000/api/push_video/start", {
+        const res = await fetch(`${API_BASE}/api/push_video/start`, {
           method: "POST",
           body: formData,
         });
@@ -38,7 +39,7 @@ function VideoArea({
           throw new Error(data.detail || "Failed to start stream to target IP");
         }
       } else {
-        const res = await fetch("http://127.0.0.1:8000/api/push_video/stop", {
+        const res = await fetch(`${API_BASE}/api/push_video/stop`, {
           method: "POST",
         });
 

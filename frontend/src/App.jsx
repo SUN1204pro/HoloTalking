@@ -1,8 +1,36 @@
 import { useState, useRef } from "react";
 import Sidebar from "./components/Sidebar/Sidebar";
 import VideoArea from "./components/VideoArea/VideoArea";
+import { API_BASE } from "./api";
+
+// Stable conversation id so the avatar's server-side memory persists across
+// reloads. One "brain" per browser.
+function getSessionId() {
+  try {
+    let id = localStorage.getItem("holo_session_id");
+    if (!id) {
+      id = "sess_" + Math.random().toString(36).slice(2) + Date.now().toString(36);
+      localStorage.setItem("holo_session_id", id);
+    }
+    return id;
+  } catch {
+    return "default";
+  }
+}
 
 function App() {
+  const [sessionId] = useState(getSessionId);
+
+  const clearConversation = async () => {
+    try {
+      const fd = new FormData();
+      fd.append("session_id", sessionId);
+      await fetch(`${API_BASE}/api/history/clear`, { method: "POST", body: fd });
+    } catch (e) {
+      console.error("Failed to clear conversation memory", e);
+    }
+  };
+
   // STATE CỦA SIDEBAR
   const [scriptText, setScriptText] = useState("");
   const [activeTab, setActiveTab] = useState("TEXT");
@@ -17,6 +45,7 @@ function App() {
   const [ttsEngine, setTtsEngine] = useState("vietneu"); // "vietneu" | "voxcpm"
   const [elevenlabsVoiceId, setElevenlabsVoiceId] = useState("");
   const [voiceStyle, setVoiceStyle] = useState("");
+  const [customVoiceRef, setCustomVoiceRef] = useState(""); // ref_id from /api/custom_voice/upload
   const [useGemini, setUseGemini] = useState(true);
   const [persona, setPersona] = useState("");
   const [fastMode, setFastMode] = useState(true);
@@ -93,7 +122,7 @@ function App() {
         }
       }
       
-      const preprocessRes = await fetch("http://127.0.0.1:8000/preprocess_avatar", {
+      const preprocessRes = await fetch(`${API_BASE}/preprocess_avatar`, {
         method: "POST",
         body: preprocessFormData,
       });
@@ -206,9 +235,12 @@ function App() {
         }
       }
 
+      formData.append("session_id", sessionId);
       formData.append("speed", ttsSpeed);
       formData.append("tts_engine", ttsEngine);
-      if (ttsEngine === "voxcpm" && elevenlabsVoiceId) {
+      if (ttsEngine === "voxcpm" && customVoiceRef) {
+        formData.append("custom_voice_ref", customVoiceRef);
+      } else if (ttsEngine === "voxcpm" && elevenlabsVoiceId) {
         formData.append("elevenlabs_voice_id", elevenlabsVoiceId);
       }
       if (ttsEngine === "voxcpm" && voiceStyle.trim()) {
@@ -220,7 +252,7 @@ function App() {
       formData.append("expression_scale", expressionScale);
       formData.append("lipsync_engine", lipsyncEngine);
 
-      const response = await fetch("http://127.0.0.1:8000/generate_stream", {
+      const response = await fetch(`${API_BASE}/generate_stream`, {
         method: "POST",
         body: formData,
       });
@@ -326,6 +358,7 @@ function App() {
 
       <main className="relative z-10 flex min-h-screen max-w-[1440px] mx-auto px-10 py-12 gap-12 items-start">
         <Sidebar
+          clearConversation={clearConversation}
           selectedImage={selectedImage}
           setSelectedImage={setSelectedImage}
           handleImageUpload={handleImageUpload}
@@ -346,6 +379,8 @@ function App() {
           setElevenlabsVoiceId={setElevenlabsVoiceId}
           voiceStyle={voiceStyle}
           setVoiceStyle={setVoiceStyle}
+          customVoiceRef={customVoiceRef}
+          setCustomVoiceRef={setCustomVoiceRef}
           useGemini={useGemini}
           setUseGemini={setUseGemini}
           persona={persona}

@@ -28,6 +28,11 @@ try:
 except Exception:
     pass
 
+# Base URL the browser (or an iPhone on the same Wi-Fi) uses to reach this server.
+# Defaults to localhost; set PUBLIC_BASE_URL=http://<mac-lan-ip>:8000 in .env so
+# generated video/image URLs are reachable from other devices.
+PUBLIC_BASE_URL = os.environ.get("PUBLIC_BASE_URL", "http://127.0.0.1:8000").rstrip("/")
+
 def apply_speed_to_audio(audio_path: str, speed: float):
     """Speeds up/slows down an existing WAV file in-place using ffmpeg's atempo filter
     (preserves pitch). No-op when speed is ~1.0."""
@@ -252,20 +257,57 @@ os.makedirs(CUSTOM_VOICE_CACHE_DIR, exist_ok=True)
 _voxcpm_instance = None
 
 
+def _pick_tts_device() -> str:
+    """cuda if a real NVIDIA GPU is present, else cpu. MPS is deliberately excluded:
+    VoxCPM's many small sequential ops run ~40-70x SLOWER on Apple's MPS than on CPU.
+    Override with TTS_DEVICE=cuda|cpu|mps in the environment."""
+    override = os.environ.get("TTS_DEVICE", "").strip().lower()
+    if override in ("cuda", "cpu", "mps"):
+        return override
+    try:
+        import torch
+        if torch.cuda.is_available():
+            return "cuda"
+    except Exception:
+        pass
+    return "cpu"
+
+
 def get_voxcpm():
     global _voxcpm_instance
     if _voxcpm_instance is None:
-        print("[VoxCPM] Loading model for the first time (this can take a while)...")
+        device = _pick_tts_device()
+        # optimize=True (VoxCPM default) wraps the model in torch.compile and then runs
+        # a throwaway "Warm up VoxCPMModel..." generation to pay the compile cost up
+        # front. torch.compile barely helps on CPU, so there we skip it (optimize=False)
+        # -- no warm-up, faster startup. On CUDA the compile is worth it, so keep it.
+        optimize = device == "cuda"
+        print(f"[VoxCPM] Loading model for the first time on {device} (optimize={optimize})...")
         # load_denoiser=False: skips loading/warming the zipenhancer ANS denoiser model,
         # which only runs CPU inference (no MPS support) and adds a multi-hour one-time
         # warm-up cost. We never pass denoise=True to generate(), so it's dead weight.
-        #
-        # device="cpu": VoxCPM's autoregressive-plus-diffusion decode loop calls many
-        # small sequential ops per step, which on Apple's MPS backend runs ~40-70x
-        # SLOWER than plain CPU (measured: ~35-57s/step on MPS vs ~0.8s/step on CPU) --
-        # the opposite of SadTalker's large batched conv ops, which do benefit from MPS.
-        _voxcpm_instance = VoxCPM.from_pretrained("openbmb/VoxCPM2", load_denoiser=False, device="cpu")
+        _voxcpm_instance = VoxCPM.from_pretrained(
+            "openbmb/VoxCPM2", load_denoiser=False, device=device, optimize=optimize
+        )
     return _voxcpm_instance
+
+
+_vieneu_instance = None
+_vieneu_lock = threading.Lock()
+
+
+def get_vieneu():
+    """Load the VieNeu TTS model once and reuse it. Constructing `Vieneu()` re-fetches
+    (and hf-xet re-reconstructs) the model weights from the Hugging Face hub every time,
+    so a fresh instance per request/sentence means a full model 'checkout' on every run.
+    Cache it like VoxCPM."""
+    global _vieneu_instance
+    if _vieneu_instance is None:
+        with _vieneu_lock:
+            if _vieneu_instance is None:
+                print("[VieNeu] Loading model for the first time...")
+                _vieneu_instance = Vieneu()
+    return _vieneu_instance
 
 
 def get_elevenlabs_client(api_key: str = None):
@@ -297,7 +339,7 @@ def get_or_create_reference_audio(voice_id: str, api_key: str = None) -> str:
         raise RuntimeError("ElevenLabs API key not configured. Set ELEVENLABS_API_KEY in .env.")
 
     vieneu_wav = ref_path + ".vieneu_src.wav"
-    tts = Vieneu()
+    tts = get_vieneu()
     voice = tts.get_preset_voice("Thái Sơn")
     audio_data = tts.infer(text=REFERENCE_TEXT_VI, voice=voice)
     tts.save(audio_data, vieneu_wav)
@@ -338,7 +380,7 @@ def get_or_create_vieneu_reference_audio(voice_name: str) -> str:
     if os.path.exists(ref_path):
         return ref_path
 
-    tts = Vieneu()
+    tts = get_vieneu()
     voice = tts.get_preset_voice(voice_name)
     audio_data = tts.infer(text=REFERENCE_TEXT_VI, voice=voice)
     tts.save(audio_data, ref_path)
@@ -354,20 +396,26 @@ def synthesize_tts(
     elevenlabs_voice_id: str = None,
     elevenlabs_api_key: str = None,
     voice_style: str = None,
+    custom_voice_ref: str = None,
 ):
     """Synthesizes `text` to `audio_path`, dispatching to VieNeu presets or VoxCPM.
-    VoxCPM clones its voice from either an ElevenLabs voice (elevenlabs_voice_id set)
-    or, with no ElevenLabs involved at all, directly from a VieNeu preset's own timbre
-    (voice_name set instead) -- fully local and free."""
+    VoxCPM clones its voice from, in priority order: an uploaded reference audio file
+    (custom_voice_ref -- a filename under custom_voices/), an ElevenLabs voice
+    (elevenlabs_voice_id), or a VieNeu preset's own timbre (voice_name) -- the last
+    two fully local and free."""
     if tts_engine == "voxcpm":
         if not VOXCPM_AVAILABLE:
             raise RuntimeError("voxcpm package is not installed.")
-        if elevenlabs_voice_id:
+        if custom_voice_ref:
+            ref_path = os.path.join(CUSTOM_VOICE_CACHE_DIR, os.path.basename(custom_voice_ref))
+            if not os.path.exists(ref_path):
+                raise RuntimeError(f"Uploaded voice reference '{custom_voice_ref}' not found.")
+        elif elevenlabs_voice_id:
             ref_path = get_or_create_reference_audio(elevenlabs_voice_id, elevenlabs_api_key)
         elif voice_name:
             ref_path = get_or_create_vieneu_reference_audio(voice_name)
         else:
-            raise RuntimeError("Select an ElevenLabs voice or a VieNeu preset to use as the VoxCPM reference.")
+            raise RuntimeError("Upload a voice sample, or select an ElevenLabs voice / VieNeu preset, to use as the VoxCPM reference.")
         model = get_voxcpm()
         # VoxCPM follows a natural-language style/delivery instruction prepended in
         # parentheses ahead of the actual line, e.g. "(deep, solemn, regal tone) <text>".
@@ -378,7 +426,7 @@ def synthesize_tts(
     else:
         if not VIENEU_AVAILABLE:
             raise RuntimeError("ViEneu TTS library is not installed or available.")
-        tts = Vieneu()
+        tts = get_vieneu()
         voice = tts.get_preset_voice(voice_name or "Thái Sơn")
         audio_data = tts.infer(text=text, voice=voice)
         tts.save(audio_data, audio_path)
@@ -427,19 +475,69 @@ _stream_lock = threading.Lock()
 _stream_state = {"active": False, "target_ip": None, "port": None}
 
 
+@app.on_event("startup")
+def _warmup_models():
+    """Load the heavy models once, at server start, so the first user request
+    doesn't eat the 'Loading model for the first time...' stall.
+
+    WARMUP=off        -> skip entirely (lazy load on first use, old behaviour)
+    WARMUP=vieneu     -> default: just the default TTS engine
+    WARMUP=vieneu,voxcpm,whisper,claude  -> comma list of what to preload
+
+    Runs in a background thread so uvicorn still reports "startup complete" fast.
+    Note: SadTalker itself can't be warmed here -- it runs as a fresh subprocess
+    per request by design."""
+    want = os.environ.get("WARMUP", "vieneu").strip().lower()
+    if want in ("off", "0", "none", "false"):
+        return
+    targets = {t.strip() for t in want.split(",") if t.strip()}
+
+    def _run():
+        if "vieneu" in targets and VIENEU_AVAILABLE:
+            try:
+                get_vieneu()
+            except Exception as e:
+                print("[warmup] VieNeu failed:", e)
+        if "voxcpm" in targets and VOXCPM_AVAILABLE:
+            try:
+                get_voxcpm()
+            except Exception as e:
+                print("[warmup] VoxCPM failed:", e)
+        if "whisper" in targets:
+            try:
+                _get_whisper()
+            except Exception as e:
+                print("[warmup] Whisper failed:", e)
+        if "claude" in targets:
+            try:
+                _get_anthropic()
+            except Exception as e:
+                print("[warmup] Claude client failed:", e)
+        print(f"[warmup] done ({', '.join(sorted(targets))})")
+
+    threading.Thread(target=_run, daemon=True).start()
+
+
 def _build_freeze_video(image_path: str, duration: float = 3.0):
     """Encode the current avatar image into a short MP4 so the holofan link can
     push a frozen frame while SadTalker is generating a new talking clip. Also
     broadcasts it immediately to every connected socket client, so viewers see
     the frozen avatar right away instead of the previous talking clip lingering
-    until the next one finishes rendering."""
+    until the next one finishes rendering.
+
+    Disabled by default -- it added an ffmpeg encode to every request and made the
+    holofan/preview flash a frozen frame before the talking clip. Set
+    ENABLE_FREEZE_FRAME=1 to bring it back."""
+    if os.environ.get("ENABLE_FREEZE_FRAME", "").strip() not in ("1", "true", "yes"):
+        return
     if not image_path or not os.path.exists(image_path):
         return
     try:
         os.makedirs(os.path.dirname(FREEZE_VIDEO_PATH), exist_ok=True)
         cmd = (
             f'ffmpeg -y -hide_banner -loglevel error -loop 1 -i "{image_path}" '
-            f'-t {duration} -vf "format=yuv420p" -c:v libx264 -movflags +faststart "{FREEZE_VIDEO_PATH}"'
+            f'-t {duration} -vf "scale=trunc(iw/2)*2:trunc(ih/2)*2,format=yuv420p" '
+            f'-c:v libx264 -movflags +faststart "{FREEZE_VIDEO_PATH}"'
         )
         subprocess.run(cmd, shell=True, check=True)
         socket_video_server.broadcast_video_update(FREEZE_VIDEO_PATH)
@@ -447,10 +545,11 @@ def _build_freeze_video(image_path: str, duration: float = 3.0):
         print(f"[freeze video] Failed to build freeze clip: {e}")
 
 
-def _direct_send_file(file_path: str, ip: str, port: int, timeout: float = 3.0) -> bool:
+def _direct_send_file(file_path: str, ip: str, port: int, timeout: float = 3.0, label: str = "") -> bool:
     if not os.path.exists(file_path) or os.path.getsize(file_path) == 0:
         return False
     file_size = os.path.getsize(file_path)
+    t_start = time.time()
     s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     s.settimeout(timeout)
     try:
@@ -462,6 +561,12 @@ def _direct_send_file(file_path: str, ip: str, port: int, timeout: float = 3.0) 
                 if not chunk:
                     break
                 s.sendall(chunk)
+        elapsed = time.time() - t_start
+        ts = time.strftime("%H:%M:%S", time.localtime(t_start)) + f".{int((t_start % 1) * 1000):03d}"
+        print(
+            f"[{ts}] [push:{label or os.path.basename(file_path)}] sent {file_size} bytes "
+            f"to {ip}:{port} in {round(elapsed, 3)}s ({round((file_size/1024/1024)/max(elapsed, 0.001), 2)} MB/s)"
+        )
         return True
     finally:
         s.close()
@@ -477,9 +582,10 @@ def _push_stream_loop(interval_seconds: float):
                 return
             ip = _stream_state["target_ip"]
             port = _stream_state["port"]
-        video_to_send = FREEZE_VIDEO_PATH if (_is_generating or not os.path.exists(LATEST_RESULT_PATH)) else LATEST_RESULT_PATH
+        use_freeze = _is_generating or not os.path.exists(LATEST_RESULT_PATH)
+        video_to_send = FREEZE_VIDEO_PATH if use_freeze else LATEST_RESULT_PATH
         try:
-            _direct_send_file(video_to_send, ip, port)
+            _direct_send_file(video_to_send, ip, port, label="freeze" if use_freeze else "real")
         except Exception as e:
             print(f"[stream loop] Push to {ip}:{port} failed: {e}")
         time.sleep(interval_seconds)
@@ -633,12 +739,48 @@ def voice_changer(
             ["ffmpeg", "-y", "-hide_banner", "-loglevel", "error", "-i", tmp_mp3, ref_path],
             check=True
         )
-        return {"voice_id": voice_id, "reference_audio_url": f"http://127.0.0.1:8000/custom_voices/{voice_id}.wav"}
+        return {"voice_id": voice_id, "reference_audio_url": f"{PUBLIC_BASE_URL}/custom_voices/{voice_id}.wav"}
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"Voice changer conversion failed: {str(e)}")
     finally:
         if os.path.exists(tmp_mp3):
             os.remove(tmp_mp3)
+
+
+@app.post("/api/custom_voice/upload")
+async def upload_custom_voice(audio: UploadFile = File(...)):
+    """Upload an audio sample (any format) to use directly as a VoxCPM voice-cloning
+    reference -- no ElevenLabs, no VieNeu. Transcoded to 16k mono WAV and stored under
+    custom_voices/. Returns a ref_id to pass back as `custom_voice_ref` on /generate*."""
+    raw = await audio.read()
+    if not raw:
+        raise HTTPException(status_code=400, detail="Empty audio upload.")
+    try:
+        wav_bytes = transcode_to_wav_bytes(raw)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Could not decode audio: {e}")
+    ref_id = f"uploaded_{hashlib.md5(wav_bytes).hexdigest()[:16]}.wav"
+    ref_path = os.path.join(CUSTOM_VOICE_CACHE_DIR, ref_id)
+    with open(ref_path, "wb") as f:
+        f.write(wav_bytes)
+    return {
+        "status": "success",
+        "ref_id": ref_id,
+        "reference_audio_url": f"{PUBLIC_BASE_URL}/custom_voices/{ref_id}",
+    }
+
+
+@app.get("/api/history")
+def get_conversation_history(session_id: str = "default"):
+    """The avatar's memory for a session: the full stored user/assistant log."""
+    return {"session_id": session_id, "messages": load_history(session_id)}
+
+
+@app.post("/api/history/clear")
+def clear_conversation_history(session_id: str = Form("default")):
+    """Wipe the avatar's memory for a session -- start a fresh conversation."""
+    clear_history(session_id)
+    return {"status": "success", "session_id": session_id}
 
 
 @app.get("/api/avatars")
@@ -651,7 +793,7 @@ def get_avatars():
         avatars.append({
             "id": filename,
             "filename": filename,
-            "url": f"http://127.0.0.1:8000/examples/source_image/{filename}"
+            "url": f"{PUBLIC_BASE_URL}/examples/source_image/{filename}"
         })
     return avatars
 
@@ -691,7 +833,7 @@ async def preprocess_avatar(
 
     return {
         "status": "success",
-        "processed_image_url": f"http://127.0.0.1:8000/static/preprocess_{timestamp}/{os.path.basename(output_path)}",
+        "processed_image_url": f"{PUBLIC_BASE_URL}/static/preprocess_{timestamp}/{os.path.basename(output_path)}",
         "processed_image_path": output_path
     }
 
@@ -724,6 +866,22 @@ async def render_talking_clip(
     state. The ~10-20s fixed subprocess-start cost is smaller than that penalty
     for any non-trivial audio length."""
     global _is_generating
+
+    # "wav2lip_only": skip SadTalker head motion entirely -- run Wav2Lip straight on
+    # the still avatar image. Much faster (no 3DMM/render pass), lips move but the
+    # head stays put. Wav2Lip's inference accepts a .png/.jpg as --face and loops
+    # that single frame for the whole audio.
+    if lipsync_engine == "wav2lip_only":
+        final_video_path = os.path.join(run_dir, clip_name)
+        _is_generating = True
+        try:
+            result_path = process_wav2lip(cached_avatar_path, audio_path, final_video_path)
+        finally:
+            _is_generating = False
+        if not os.path.exists(final_video_path):
+            raise HTTPException(status_code=500, detail="Wav2Lip-only generation failed (check checkpoints/wav2lip_gan.pth and face detection).")
+        return final_video_path
+
     python_exe = sys.executable
     cmd_parts = [
         f'"{python_exe}"', "inference.py",
@@ -779,14 +937,20 @@ async def generate_video(
     elevenlabs_voice_id: str = Form(None),
     elevenlabs_api_key: str = Form(None),
     voice_style: str = Form(None),
+    custom_voice_ref: str = Form(None),
     preprocess: str = Form("crop"),
     enhancer: str = Form("none"),
     still: bool = Form(True),
     expression_scale: float = Form(1.0),
     pose_style: int = Form(0),
     lipsync_engine: str = Form("wav2lip"),
-    skip_bg_remove: bool = Form(False)
+    skip_bg_remove: bool = Form(False),
+    session_id: str = Form("default")
 ):
+    request_received_at = time.time()
+    _ts = time.strftime("%H:%M:%S", time.localtime(request_received_at)) + f".{int((request_received_at % 1) * 1000):03d}"
+    print(f"[{_ts}] [latency] /generate request received")
+
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     run_dir = os.path.join("temp_files", f"test_run_{timestamp}")
     os.makedirs(run_dir, exist_ok=True)
@@ -816,7 +980,8 @@ async def generate_video(
                     audio_bytes=wav_bytes,
                     mime_type="audio/wav",
                     persona=persona,
-                    api_key=api_key
+                    api_key=api_key,
+                    session_id=session_id
                 )
             except Exception as e:
                 print("Gemini Audio AI response failed:", e)
@@ -839,7 +1004,7 @@ async def generate_video(
                         text=final_speak_text, audio_path=audio_path, speed=speed,
                         tts_engine=tts_engine, voice_name=voice_name,
                         elevenlabs_voice_id=elevenlabs_voice_id, elevenlabs_api_key=elevenlabs_api_key,
-                        voice_style=voice_style
+                        voice_style=voice_style, custom_voice_ref=custom_voice_ref
                     )
                 except Exception as e:
                     print(f"TTS ({tts_engine}) failed, falling back to original recorded audio:", e)
@@ -863,7 +1028,7 @@ async def generate_video(
                 text=final_speak_text, audio_path=audio_path, speed=speed,
                 tts_engine=tts_engine, voice_name=voice_name,
                 elevenlabs_voice_id=elevenlabs_voice_id, elevenlabs_api_key=elevenlabs_api_key,
-                voice_style=voice_style
+                voice_style=voice_style, custom_voice_ref=custom_voice_ref
             )
         except Exception as e:
             raise HTTPException(status_code=500, detail=f"TTS ({tts_engine}) failed: {str(e)}")
@@ -921,6 +1086,12 @@ async def generate_video(
     result_copy_path = os.path.join("result", f"result_{timestamp}.mp4")
     shutil.copy(final_video_path, result_copy_path)
     shutil.copy(final_video_path, "../../result/latest_result.mp4")
+    _t_ready = time.time()
+    _ts_ready = time.strftime("%H:%M:%S", time.localtime(_t_ready)) + f".{int((_t_ready % 1) * 1000):03d}"
+    print(
+        f"[{_ts_ready}] [latency] real result ready ({round(_t_ready - request_received_at, 2)}s "
+        f"since request received)"
+    )
 
     # Auto-push the freshly generated clip to any connected holofan client(s),
     # without blocking the HTTP response on the broadcast itself.
@@ -932,8 +1103,8 @@ async def generate_video(
 
     return {
         "status": "success",
-        "video_url": f"http://127.0.0.1:8000/static/test_run_{timestamp}/{final_video_name}",
-        "result_url": f"http://127.0.0.1:8000/result/result_{timestamp}.mp4",
+        "video_url": f"{PUBLIC_BASE_URL}/static/test_run_{timestamp}/{final_video_name}",
+        "result_url": f"{PUBLIC_BASE_URL}/result/result_{timestamp}.mp4",
         "spoken_text": final_speak_text,
         "generation_time_seconds": elapsed_seconds,
         "lipsync_engine": lipsync_engine
@@ -956,13 +1127,15 @@ async def generate_video_stream(
     elevenlabs_voice_id: str = Form(None),
     elevenlabs_api_key: str = Form(None),
     voice_style: str = Form(None),
+    custom_voice_ref: str = Form(None),
     preprocess: str = Form("crop"),
     enhancer: str = Form("none"),
     still: bool = Form(True),
     expression_scale: float = Form(1.0),
     pose_style: int = Form(0),
     lipsync_engine: str = Form("wav2lip"),
-    skip_bg_remove: bool = Form(False)
+    skip_bg_remove: bool = Form(False),
+    session_id: str = Form("default")
 ):
     """Same pipeline as /generate, but splits the text into sentences and streams back
     one clip per sentence (Server-Sent Events) as each finishes rendering, instead of
@@ -993,7 +1166,8 @@ async def generate_video_stream(
             try:
                 wav_bytes = transcode_to_wav_bytes(raw_bytes)
                 final_speak_text = generate_gemini_response(
-                    audio_bytes=wav_bytes, mime_type="audio/wav", persona=persona, api_key=api_key
+                    audio_bytes=wav_bytes, mime_type="audio/wav", persona=persona, api_key=api_key,
+                    session_id=session_id
                 )
             except Exception as e:
                 print("Gemini Audio AI response failed:", e)
@@ -1041,7 +1215,10 @@ async def generate_video_stream(
                 return
             sentences = None
         else:
-            sentences = split_into_sentences(final_speak_text) or [final_speak_text.strip()]
+            # Render the whole reply as ONE clip so the avatar speaks the entire text,
+            # instead of splitting into per-sentence clips (which only played the first
+            # one when the clip-to-clip handoff didn't fire).
+            sentences = [final_speak_text.strip()]
 
         total = len(sentences) if sentences else 1
         yield sse({"type": "meta", "total": total, "full_text": final_speak_text or ""})
@@ -1056,7 +1233,7 @@ async def generate_video_stream(
                         text=sentence, audio_path=clip_audio_path, speed=speed,
                         tts_engine=tts_engine, voice_name=voice_name,
                         elevenlabs_voice_id=elevenlabs_voice_id, elevenlabs_api_key=elevenlabs_api_key,
-                        voice_style=voice_style
+                        voice_style=voice_style, custom_voice_ref=custom_voice_ref
                     )
                 else:
                     sentence = final_speak_text or ""
@@ -1080,8 +1257,8 @@ async def generate_video_stream(
                     "index": i,
                     "total": total,
                     "sentence": sentence,
-                    "video_url": f"http://127.0.0.1:8000/static/stream_run_{timestamp}/{os.path.basename(clip_video_path)}",
-                    "result_url": f"http://127.0.0.1:8000/result/result_{timestamp}_{i}.mp4",
+                    "video_url": f"{PUBLIC_BASE_URL}/static/stream_run_{timestamp}/{os.path.basename(clip_video_path)}",
+                    "result_url": f"{PUBLIC_BASE_URL}/result/result_{timestamp}_{i}.mp4",
                     "generation_time_seconds": elapsed,
                 })
         except HTTPException as e:
@@ -1104,12 +1281,126 @@ async def generate_video_stream(
     return StreamingResponse(event_stream(), media_type="text/event-stream")
 
 
-def generate_gemini_response(user_message: str = None, audio_bytes: bytes = None, mime_type: str = "audio/wav", persona: str = None, history_json: str = None, api_key: str = None) -> str:
+def _get_whisper():
+    """Lazily load a local Whisper ASR pipeline. Claude has no audio input, so
+    live-mic audio is transcribed here first, then the text is sent to Claude.
+    Override the model with WHISPER_MODEL (default openai/whisper-small)."""
+    global _whisper_pipe
+    if _whisper_pipe is None:
+        with _whisper_lock:
+            if _whisper_pipe is None:
+                from transformers import pipeline
+                model_id = os.environ.get("WHISPER_MODEL", "openai/whisper-small")
+                device = _pick_tts_device()
+                print(f"[Whisper] Loading {model_id} on {device} for speech-to-text...")
+                _whisper_pipe = pipeline(
+                    "automatic-speech-recognition",
+                    model=model_id,
+                    device=0 if device == "cuda" else -1,
+                    chunk_length_s=30,
+                )
+    return _whisper_pipe
+
+
+_whisper_pipe = None
+_whisper_lock = threading.Lock()
+
+
+def _transcribe_audio(audio_bytes: bytes) -> str:
+    tmp = os.path.join("temp_files", f"stt_{uuid.uuid4().hex}.wav")
+    os.makedirs("temp_files", exist_ok=True)
+    try:
+        with open(tmp, "wb") as f:
+            f.write(audio_bytes)
+        out = _get_whisper()(
+            tmp, generate_kwargs={"language": "vietnamese", "task": "transcribe"}
+        )
+        return (out.get("text") or "").strip()
+    finally:
+        if os.path.exists(tmp):
+            os.remove(tmp)
+
+
+_anthropic_client = None
+
+
+def _get_anthropic(api_key: str = None):
+    """Anthropic client. Uses the passed api_key if given (fresh client), else a
+    cached client from ANTHROPIC_API_KEY / CLAUDE_API_KEY."""
+    global _anthropic_client
+    passed = (api_key or "").strip()
+    env_key = os.environ.get("ANTHROPIC_API_KEY", "").strip() or os.environ.get("CLAUDE_API_KEY", "").strip()
+    if not passed and not env_key:
+        return None
+    try:
+        import anthropic
+    except ImportError:
+        print("[Claude] `anthropic` package not installed -- run: pip install anthropic")
+        return None
+    if passed:
+        return anthropic.Anthropic(api_key=passed)
+    if _anthropic_client is None:
+        _anthropic_client = anthropic.Anthropic(api_key=env_key)
+    return _anthropic_client
+
+
+# --- Persistent conversation memory ---------------------------------------
+# The avatar's "brain": every user turn + Claude reply is kept per session and
+# fed back on the next turn, so it remembers the whole conversation. Stored on
+# disk so it survives restarts. CLAUDE_HISTORY_TURNS caps how many past messages
+# are sent to Claude (cost/context bound); the full log stays on disk.
+CONVERSATIONS_DIR = "conversations"
+os.makedirs(CONVERSATIONS_DIR, exist_ok=True)
+_history_lock = threading.Lock()
+
+
+def _history_path(session_id: str) -> str:
+    safe = re.sub(r"[^a-zA-Z0-9_-]", "_", session_id or "default")[:64] or "default"
+    return os.path.join(CONVERSATIONS_DIR, f"{safe}.json")
+
+
+def load_history(session_id: str) -> list:
+    path = _history_path(session_id)
+    if not os.path.exists(path):
+        return []
+    try:
+        import json
+        with open(path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        return data if isinstance(data, list) else []
+    except Exception as e:
+        print(f"[history] failed to read {path}: {e}")
+        return []
+
+
+def append_history(session_id: str, user_text: str, assistant_text: str):
     import json
-    import base64
-    key = (api_key and api_key.strip()) or os.environ.get("GEMINI_API_KEY", "").strip()
-    if not key:
-        print("Missing Gemini API Key, returning fallback text ' '")
+    with _history_lock:
+        hist = load_history(session_id)
+        hist.append({"role": "user", "content": user_text})
+        hist.append({"role": "assistant", "content": assistant_text})
+        try:
+            with open(_history_path(session_id), "w", encoding="utf-8") as f:
+                json.dump(hist, f, ensure_ascii=False, indent=1)
+        except Exception as e:
+            print(f"[history] failed to write: {e}")
+
+
+def clear_history(session_id: str):
+    path = _history_path(session_id)
+    if os.path.exists(path):
+        os.remove(path)
+
+
+def generate_gemini_response(user_message: str = None, audio_bytes: bytes = None, mime_type: str = "audio/wav", persona: str = None, history_json: str = None, api_key: str = None, session_id: str = None) -> str:
+    """Generate the avatar's reply with Claude (Anthropic). Name kept for call-site
+    compatibility. Audio input is transcribed locally with Whisper first, because
+    Claude has no audio input. Set CLAUDE_MODEL to override the model
+    (default claude-opus-5); set CLAUDE_EFFORT to low|medium|high (default low)."""
+    import json
+    client = _get_anthropic(api_key)
+    if client is None:
+        print("[Claude] No ANTHROPIC_API_KEY / CLAUDE_API_KEY configured, returning fallback ' '")
         return " "
 
     system_instruction = (
@@ -1119,68 +1410,79 @@ def generate_gemini_response(user_message: str = None, audio_bytes: bytes = None
     if persona and persona.strip():
         system_instruction += f"\n\nVai trò / Tính cách nhân vật của bạn: {persona.strip()}"
 
-    parts = []
     if audio_bytes:
-        encoded = base64.b64encode(audio_bytes).decode("utf-8")
-        parts.append({
-            "inline_data": {
-                "mime_type": mime_type,
-                "data": encoded
-            }
-        })
-        parts.append({"text": "Hãy lắng nghe câu hỏi/lời nói giọng nói này của người dùng và trả lời bằng văn bản tiếng Việt tự nhiên, cô đọng."})
-    elif user_message:
-        parts.append({"text": user_message})
-    else:
-        parts.append({"text": "Xin chào nhân vật AI."})
-
-    contents = []
-    if history_json:
         try:
-            parsed_history = json.loads(history_json)
-            if isinstance(parsed_history, list):
-                contents.extend(parsed_history)
+            user_text = _transcribe_audio(audio_bytes)
+        except Exception as e:
+            print("[Whisper] transcription failed:", e)
+            user_text = ""
+        if not user_text:
+            print("[Whisper] empty transcript, returning fallback ' '")
+            return " "
+        print(f"[Whisper] Transcribed: {user_text}")
+    elif user_message and user_message.strip():
+        user_text = user_message.strip()
+    else:
+        user_text = "Xin chào nhân vật AI."
+
+    messages = []
+
+    # Persistent per-session memory takes priority: the avatar remembers the
+    # whole conversation across turns and restarts.
+    if session_id:
+        stored = load_history(session_id)
+        try:
+            cap = int(os.environ.get("CLAUDE_HISTORY_TURNS", "20"))
+        except ValueError:
+            cap = 20
+        for m in stored[-cap:]:
+            if isinstance(m, dict) and m.get("role") in ("user", "assistant") and m.get("content"):
+                messages.append({"role": m["role"], "content": m["content"]})
+    elif history_json:
+        try:
+            parsed = json.loads(history_json)
+            for m in (parsed if isinstance(parsed, list) else []):
+                if not isinstance(m, dict):
+                    continue
+                role = m.get("role")
+                if role == "model":
+                    role = "assistant"
+                if role not in ("user", "assistant"):
+                    continue
+                content = m.get("content")
+                if content is None and isinstance(m.get("parts"), list):
+                    content = " ".join(p.get("text", "") for p in m["parts"] if isinstance(p, dict)).strip()
+                if content:
+                    messages.append({"role": role, "content": content})
         except Exception as e:
             print("Error parsing conversation history:", e)
+    messages.append({"role": "user", "content": user_text})
 
-    contents.append({
-        "role": "user",
-        "parts": parts
-    })
-
-    models_to_try = ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-3.6-flash", "gemini-flash-latest"]
-
-    for model in models_to_try:
-        url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={key}"
-        payload = {
-            "contents": contents,
-            "systemInstruction": {
-                "parts": [{"text": system_instruction}]
-            },
-            "generationConfig": {
-                "maxOutputTokens": 300,
-                "temperature": 0.7
-            }
-        }
+    model = os.environ.get("CLAUDE_MODEL", "claude-opus-5")
+    effort = os.environ.get("CLAUDE_EFFORT", "low")
+    try:
+        import anthropic
+        kwargs = dict(model=model, max_tokens=1024, system=system_instruction, messages=messages)
         try:
-            res = requests.post(url, json=payload, headers={"Content-Type": "application/json"}, timeout=20)
-            if res.status_code == 200:
-                res_data = res.json()
-                if "candidates" in res_data and res_data["candidates"]:
-                    candidate = res_data["candidates"][0]
-                    if "content" in candidate and "parts" in candidate["content"]:
-                        text_list = [p.get("text", "") for p in candidate["content"]["parts"] if isinstance(p, dict) and "text" in p]
-                        combined_text = " ".join([t.strip() for t in text_list if t.strip()]).strip()
-                        if combined_text:
-                            print(f"[Gemini Success via {model}]: {combined_text}")
-                            return combined_text
-            else:
-                print(f"[Gemini {model} HTTP {res.status_code}]: {res.text[:200]}")
-        except Exception as e:
-            print(f"[Gemini call model {model} failed]:", e)
+            resp = client.messages.create(output_config={"effort": effort}, **kwargs)
+        except TypeError:
+            resp = client.messages.create(**kwargs)
+        if getattr(resp, "stop_reason", None) == "refusal":
+            print(f"[Claude {model}] refusal: {getattr(resp, 'stop_details', None)}")
+            return " "
+        text = "".join(b.text for b in resp.content if getattr(b, "type", None) == "text").strip()
+        if text:
+            print(f"[Claude Success via {model}]: {text}")
+            if session_id:
+                append_history(session_id, user_text, text)
+            return text
+        print(f"[Claude {model}] empty response (stop_reason={getattr(resp, 'stop_reason', None)})")
+    except anthropic.APIStatusError as e:
+        print(f"[Claude {model} API error {e.status_code}]: {getattr(e, 'message', str(e))}")
+    except Exception as e:
+        print("[Claude call failed]:", e)
 
-    # When no text received from Gemini, run text " "
-    print("[Gemini] No text returned from any Gemini model. Falling back to text ' '")
+    print("[Claude] No text returned. Falling back to ' '")
     return " "
 
 
@@ -1198,12 +1500,14 @@ async def agent_chat(
     elevenlabs_voice_id: str = Form(None),
     elevenlabs_api_key: str = Form(None),
     voice_style: str = Form(None),
+    custom_voice_ref: str = Form(None),
     preprocess: str = Form("crop"),
     enhancer: str = Form("none"),
     still: bool = Form(True),
     expression_scale: float = Form(1.0),
     pose_style: int = Form(0),
-    skip_bg_remove: bool = Form(False)
+    skip_bg_remove: bool = Form(False),
+    session_id: str = Form("default")
 ):
     if not user_message or not user_message.strip():
         raise HTTPException(status_code=400, detail="User message is empty.")
@@ -1268,7 +1572,8 @@ async def agent_chat(
         user_message=user_message,
         persona=persona,
         history_json=history,
-        api_key=api_key
+        api_key=api_key,
+        session_id=session_id
     )
 
     # 3. TTS Audio Generation (ViEneu preset voice or VoxCPM cloning an ElevenLabs voice)
@@ -1278,7 +1583,7 @@ async def agent_chat(
             text=agent_text, audio_path=audio_path, speed=speed,
             tts_engine=tts_engine, voice_name=voice_name,
             elevenlabs_voice_id=elevenlabs_voice_id, elevenlabs_api_key=elevenlabs_api_key,
-            voice_style=voice_style
+            voice_style=voice_style, custom_voice_ref=custom_voice_ref
         )
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"TTS ({tts_engine}) synthesis failed: {str(e)}")
@@ -1324,8 +1629,8 @@ async def agent_chat(
         "status": "success",
         "user_message": user_message,
         "agent_response": agent_text,
-        "video_url": f"http://127.0.0.1:8000/static/agent_run_{timestamp}/{final_video_name}",
-        "audio_url": f"http://127.0.0.1:8000/static/agent_run_{timestamp}/agent_voice.wav"
+        "video_url": f"{PUBLIC_BASE_URL}/static/agent_run_{timestamp}/{final_video_name}",
+        "audio_url": f"{PUBLIC_BASE_URL}/static/agent_run_{timestamp}/agent_voice.wav"
     }
 
 

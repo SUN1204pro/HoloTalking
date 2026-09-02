@@ -170,7 +170,9 @@ def datagen(frames, mels):
 
 
 mel_step_size = 16
-if torch.cuda.is_available():
+if os.environ.get("SADTALKER_FORCE_CPU") == "1":
+    device = 'cpu'
+elif torch.cuda.is_available():
     device = 'cuda'
 elif torch.backends.mps.is_available():
     device = 'mps'

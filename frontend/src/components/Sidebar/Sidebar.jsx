@@ -10,7 +10,8 @@ function Sidebar({
   selectedVoice, setSelectedVoice, ttsSpeed, setTtsSpeed,
   ttsEngine, setTtsEngine, elevenlabsVoiceId, setElevenlabsVoiceId,
   voiceStyle, setVoiceStyle,
-  useGemini, setUseGemini, persona, setPersona,
+  customVoiceRef, setCustomVoiceRef,
+  useGemini, setUseGemini, persona, setPersona, clearConversation,
   preprocess, setPreprocess, enhancer, setEnhancer, still, setStill,
   expressionScale, setExpressionScale, fastMode, setFastMode,
   lipsyncEngine, setLipsyncEngine,
@@ -26,7 +27,7 @@ function Sidebar({
               AI VIDEO<br />GENERATOR
             </h1>
             <p className="mt-2 font-label text-[9px] tracking-[0.25em] text-outline uppercase">
-              Gemini AI • Vietneu TTS • SadTalker Avatar
+              Claude AI • Vietneu TTS • SadTalker Avatar
             </p>
           </div>
 
@@ -41,7 +42,8 @@ function Sidebar({
             ttsEngine={ttsEngine} setTtsEngine={setTtsEngine}
             elevenlabsVoiceId={elevenlabsVoiceId} setElevenlabsVoiceId={setElevenlabsVoiceId}
             voiceStyle={voiceStyle} setVoiceStyle={setVoiceStyle}
-            useGemini={useGemini} setUseGemini={setUseGemini}
+            customVoiceRef={customVoiceRef} setCustomVoiceRef={setCustomVoiceRef}
+            useGemini={useGemini} setUseGemini={setUseGemini} clearConversation={clearConversation}
             persona={persona} setPersona={setPersona}
             handleGenerate={handleGenerate}
           />

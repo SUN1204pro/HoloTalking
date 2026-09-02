@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect } from "react";
 import TabGroup from "../common/TabGroup";
+import { API_BASE } from "../../api";
 
 const VIETNEU_VOICES = [
   { id: "Thái Sơn", name: "Thái Sơn (Nam - Bắc trầm ấm, dõng dạc)" },
@@ -20,8 +21,29 @@ function VoiceEngineSelector({
   ttsSpeed, setTtsSpeed, ttsEngine, setTtsEngine,
   elevenlabsVoiceId, setElevenlabsVoiceId,
   voiceStyle, setVoiceStyle,
+  customVoiceRef, setCustomVoiceRef,
 }) {
   const [elevenlabsVoices, setElevenlabsVoices] = useState([]);
+  const [voiceUploadStatus, setVoiceUploadStatus] = useState("idle"); // idle | uploading | ready | error
+  const [voiceUploadError, setVoiceUploadError] = useState("");
+
+  const handleVoiceRefUpload = async (file) => {
+    if (!file) return;
+    setVoiceUploadStatus("uploading");
+    setVoiceUploadError("");
+    try {
+      const fd = new FormData();
+      fd.append("audio", file);
+      const res = await fetch(`${API_BASE}/api/custom_voice/upload`, { method: "POST", body: fd });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.detail || "Upload failed");
+      setCustomVoiceRef(data.ref_id);
+      setVoiceUploadStatus("ready");
+    } catch (err) {
+      setVoiceUploadError(err.message || "Upload failed");
+      setVoiceUploadStatus("error");
+    }
+  };
   const [elevenlabsStatus, setElevenlabsStatus] = useState("idle"); // idle | loading | ready | error
   const [elevenlabsError, setElevenlabsError] = useState("");
 
@@ -42,7 +64,7 @@ function VoiceEngineSelector({
     const loadInitialVoices = async () => {
       setElevenlabsStatus("loading");
       try {
-        const res = await fetch("http://127.0.0.1:8000/api/elevenlabs/voices");
+        const res = await fetch(`${API_BASE}/api/elevenlabs/voices`);
         const data = await res.json();
         if (!res.ok) throw new Error(data.detail || "Failed to load ElevenLabs voices");
         setElevenlabsVoices(data);
@@ -67,7 +89,7 @@ function VoiceEngineSelector({
       const formData = new FormData();
       formData.append("voice_id", elevenlabsVoiceId);
       formData.append("audio", changerFile);
-      const res = await fetch("http://127.0.0.1:8000/api/elevenlabs/voice-changer", {
+      const res = await fetch(`${API_BASE}/api/elevenlabs/voice-changer`, {
         method: "POST",
         body: formData,
       });
@@ -136,32 +158,64 @@ function VoiceEngineSelector({
           <label className="block font-label text-[10px] text-outline mb-1">
             VOXCPM CLONE SOURCE
           </label>
-          <div className="grid grid-cols-2 gap-2 mb-2">
+          <div className="grid grid-cols-3 gap-2 mb-2">
             <button
               type="button"
-              onClick={() => setVoxcpmCloneSource("elevenlabs")}
+              onClick={() => { setVoxcpmCloneSource("elevenlabs"); setCustomVoiceRef(""); }}
               className={`text-[10px] font-label uppercase py-1.5 rounded-lg border transition-colors cursor-pointer ${
                 voxcpmCloneSource === "elevenlabs"
                   ? "bg-secondary text-black border-secondary font-bold"
                   : "bg-black/40 text-outline border-outline-variant/60 hover:border-secondary/60"
               }`}
             >
-              ElevenLabs Voice
+              ElevenLabs
             </button>
             <button
               type="button"
-              onClick={() => { setVoxcpmCloneSource("vietneu"); setElevenlabsVoiceId(""); }}
+              onClick={() => { setVoxcpmCloneSource("vietneu"); setElevenlabsVoiceId(""); setCustomVoiceRef(""); }}
               className={`text-[10px] font-label uppercase py-1.5 rounded-lg border transition-colors cursor-pointer ${
                 voxcpmCloneSource === "vietneu"
                   ? "bg-secondary text-black border-secondary font-bold"
                   : "bg-black/40 text-outline border-outline-variant/60 hover:border-secondary/60"
               }`}
             >
-              VieNeu Preset (Local, Free)
+              VieNeu Preset
+            </button>
+            <button
+              type="button"
+              onClick={() => { setVoxcpmCloneSource("upload"); setElevenlabsVoiceId(""); }}
+              className={`text-[10px] font-label uppercase py-1.5 rounded-lg border transition-colors cursor-pointer ${
+                voxcpmCloneSource === "upload"
+                  ? "bg-secondary text-black border-secondary font-bold"
+                  : "bg-black/40 text-outline border-outline-variant/60 hover:border-secondary/60"
+              }`}
+            >
+              Upload Voice
             </button>
           </div>
 
-          {voxcpmCloneSource === "vietneu" ? (
+          {voxcpmCloneSource === "upload" ? (
+            <div className="space-y-1.5">
+              <input
+                type="file"
+                accept="audio/*"
+                onChange={(e) => handleVoiceRefUpload(e.target.files?.[0])}
+                className="w-full text-[11px] text-outline file:mr-2 file:py-1.5 file:px-3 file:rounded-lg file:border-0 file:text-[10px] file:font-label file:uppercase file:bg-secondary file:text-black file:cursor-pointer"
+              />
+              <p className="text-[10px] text-outline italic">
+                Upload a clean 5-20s speech sample. VoxCPM clones this voice directly -- no ElevenLabs, fully local.
+              </p>
+              {voiceUploadStatus === "uploading" && (
+                <p className="text-[10px] text-secondary">Uploading &amp; preparing reference...</p>
+              )}
+              {voiceUploadStatus === "ready" && customVoiceRef && (
+                <p className="text-[10px] text-emerald-400">Voice reference ready ({customVoiceRef}).</p>
+              )}
+              {voiceUploadStatus === "error" && (
+                <p className="text-[10px] text-red-400">{voiceUploadError}</p>
+              )}
+            </div>
+          ) : voxcpmCloneSource === "vietneu" ? (
             <div>
               <select
                 value={selectedVoice}
@@ -306,14 +360,15 @@ function InputArea({
   selectedVoice, setSelectedVoice, ttsSpeed, setTtsSpeed,
   ttsEngine, setTtsEngine, elevenlabsVoiceId, setElevenlabsVoiceId,
   voiceStyle, setVoiceStyle,
-  useGemini, setUseGemini, persona, setPersona,
+  customVoiceRef, setCustomVoiceRef,
+  useGemini, setUseGemini, persona, setPersona, clearConversation,
   handleGenerate
 }) {
   const [voices, setVoices] = useState(VIETNEU_VOICES);
 
   // Fetch dynamic voices from backend if available
   useEffect(() => {
-    fetch("http://127.0.0.1:8000/api/voices")
+    fetch(`${API_BASE}/api/voices`)
       .then((res) => res.json())
       .then((data) => {
         if (Array.isArray(data) && data.length > 0) {
@@ -417,6 +472,7 @@ function InputArea({
             ttsEngine={ttsEngine} setTtsEngine={setTtsEngine}
             elevenlabsVoiceId={elevenlabsVoiceId} setElevenlabsVoiceId={setElevenlabsVoiceId}
             voiceStyle={voiceStyle} setVoiceStyle={setVoiceStyle}
+            customVoiceRef={customVoiceRef} setCustomVoiceRef={setCustomVoiceRef}
           />
 
           {/* Text script area */}
@@ -443,13 +499,14 @@ function InputArea({
             ttsEngine={ttsEngine} setTtsEngine={setTtsEngine}
             elevenlabsVoiceId={elevenlabsVoiceId} setElevenlabsVoiceId={setElevenlabsVoiceId}
             voiceStyle={voiceStyle} setVoiceStyle={setVoiceStyle}
+            customVoiceRef={customVoiceRef} setCustomVoiceRef={setCustomVoiceRef}
           />
 
           {/* Gemini AI Agent Toggle for Live Mic */}
           <div className="p-3 bg-black/30 border border-outline-variant/40 rounded-xl">
             <div className="flex items-center justify-between">
               <label htmlFor="gemini-mic-toggle" className="flex items-center gap-2 text-xs font-label text-secondary cursor-pointer bronze-glow">
-                <span>✨ Gemini AI Speech-to-Speech Mode</span>
+                <span>✨ AI Agent Reply (Claude)</span>
               </label>
               <input
                 id="gemini-mic-toggle"
@@ -468,6 +525,16 @@ function InputArea({
                   placeholder="Character Persona (e.g. Vua Lý Thái Tổ...)"
                   className="w-full text-xs bg-black/60 rounded-lg border border-outline-variant/50 p-2 outline-none focus:border-secondary text-on-surface placeholder:text-outline/70"
                 />
+                <div className="flex items-center justify-between">
+                  <span className="text-[10px] text-outline italic">The avatar remembers this whole conversation.</span>
+                  <button
+                    type="button"
+                    onClick={clearConversation}
+                    className="text-[10px] font-label uppercase text-red-400 hover:underline cursor-pointer"
+                  >
+                    Clear memory
+                  </button>
+                </div>
               </div>
             )}
           </div>

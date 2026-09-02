@@ -56,12 +56,10 @@ function MainPlayer({
             />
           ) : selectedImage ? (
             <div className="relative w-full h-full flex items-center justify-center">
-              <img 
-                src={selectedImage} 
-                alt="Live Avatar Standby" 
-                className={`w-full h-full object-contain transition-all duration-700 ${
-                  isGenerating || isIdleGenerating ? 'scale-105 filter brightness-90 animate-pulse' : 'scale-100'
-                }`}
+              <img
+                src={selectedImage}
+                alt="Live Avatar Standby"
+                className="w-full h-full object-contain"
               />
               <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-black/20" />
             </div>

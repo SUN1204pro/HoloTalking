@@ -142,7 +142,7 @@ if __name__ == '__main__':
 
     args = parser.parse_args()
 
-    if args.cpu:
+    if args.cpu or os.environ.get("SADTALKER_FORCE_CPU") == "1":
         args.device = "cpu"
     elif torch.cuda.is_available():
         args.device = "cuda"
