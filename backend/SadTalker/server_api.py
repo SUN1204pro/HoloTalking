@@ -1530,7 +1530,9 @@ def _gemini_reply(system_instruction, history_messages, user_text, audio_bytes, 
     else:
         contents.append({"role": "user", "parts": [{"text": user_text or "Xin chào nhân vật AI."}]})
 
-    models_to_try = ["gemini-flash-latest", "gemini-2.5-flash", "gemini-2.5-flash-lite"]
+    # Fastest first. Override with GEMINI_MODEL=... in .env to pin one.
+    _pin = os.environ.get("GEMINI_MODEL", "").strip()
+    models_to_try = [_pin] if _pin else ["gemini-2.5-flash-lite", "gemini-flash-latest", "gemini-2.5-flash"]
     base_cfg = {"maxOutputTokens": 2048, "temperature": 0.7}
     for model in models_to_try:
         url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={key}"
