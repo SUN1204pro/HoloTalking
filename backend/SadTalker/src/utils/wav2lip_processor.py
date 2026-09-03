@@ -14,12 +14,14 @@ def process_wav2lip(video_path: str, audio_path: str, output_path: str, checkpoi
 
     try:
         python_exe = sys.executable
+        wl_bs = os.environ.get("WAV2LIP_BATCH_SIZE", "32")   # was 128 default -> less VRAM
         cmd = [
             python_exe, "-m", "src.utils.wav2lip_inference",
             "--checkpoint_path", checkpoint_path,
             "--face", video_path,
             "--audio", audio_path,
-            "--outfile", output_path
+            "--outfile", output_path,
+            "--wav2lip_batch_size", str(wl_bs),
         ]
         result = subprocess.run(cmd, capture_output=True, text=True)
         if result.returncode == 0 and os.path.exists(output_path):

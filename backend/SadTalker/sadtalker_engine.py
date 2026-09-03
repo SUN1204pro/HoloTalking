@@ -13,6 +13,7 @@ import shutil
 import threading
 
 os.environ.setdefault("PYTORCH_ENABLE_MPS_FALLBACK", "1")
+os.environ.setdefault("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")
 
 import torch
 
@@ -83,9 +84,9 @@ def generate(
     written inside result_dir (named clip_name)."""
     if batch_size is None:
         try:
-            batch_size = int(os.environ.get("SADTALKER_BATCH_SIZE", "8"))
+            batch_size = int(os.environ.get("SADTALKER_BATCH_SIZE", "4"))
         except ValueError:
-            batch_size = 8
+            batch_size = 4
     preprocess = preprocess if preprocess in ("crop", "extcrop", "full", "extfull", "resize") else "crop"
     enh = enhancer if enhancer and enhancer != "none" else None
 
