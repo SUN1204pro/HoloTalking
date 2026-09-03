@@ -656,6 +656,7 @@ def health_check():
         "warming_up": not _warm_state["ready"],
         "warmup_stage": _warm_state["stage"],
         "warmup_error": _warm_state["error"],
+        "is_generating": _is_generating,
         "timestamp": datetime.now().isoformat()
     }
 
@@ -670,16 +671,35 @@ def _latest_video_file():
     return None
 
 
+def _video_duration(path: str) -> float:
+    try:
+        out = subprocess.run(
+            ["ffprobe", "-v", "error", "-show_entries", "format=duration",
+             "-of", "default=nw=1:nk=1", path],
+            capture_output=True, text=True, timeout=10,
+        )
+        return round(float(out.stdout.strip()), 2)
+    except Exception:
+        return 0.0
+
+
 @app.get("/api/latest_video")
 def latest_video_info():
     """Lightweight poll target for the fan bridge: a `version` string that changes
-    whenever a new talking clip is produced. Poll this; when `version` changes,
-    GET /api/latest_video/download."""
+    whenever a new talking clip is produced, plus `is_generating` and the clip
+    `duration` so the bridge can switch the fan between the freeze and talking
+    slots. Poll this; when `version` changes, GET /api/latest_video/download."""
     p = _latest_video_file()
     if not p:
-        return {"available": False}
+        return {"available": False, "is_generating": _is_generating}
     st = os.stat(p)
-    return {"available": True, "version": f"{int(st.st_mtime)}-{st.st_size}", "size": st.st_size}
+    return {
+        "available": True,
+        "version": f"{int(st.st_mtime)}-{st.st_size}",
+        "size": st.st_size,
+        "duration": _video_duration(p),
+        "is_generating": _is_generating,
+    }
 
 
 @app.get("/api/latest_video/download")
