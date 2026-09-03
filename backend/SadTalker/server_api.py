@@ -671,14 +671,24 @@ def _latest_video_file():
     return None
 
 
+_duration_cache = {}   # (path, mtime, size) -> seconds
+
+
 def _video_duration(path: str) -> float:
     try:
+        st = os.stat(path)
+        key = (path, int(st.st_mtime), st.st_size)
+        if key in _duration_cache:
+            return _duration_cache[key]
         out = subprocess.run(
             ["ffprobe", "-v", "error", "-show_entries", "format=duration",
              "-of", "default=nw=1:nk=1", path],
             capture_output=True, text=True, timeout=10,
         )
-        return round(float(out.stdout.strip()), 2)
+        d = round(float(out.stdout.strip()), 2)
+        _duration_cache.clear()
+        _duration_cache[key] = d
+        return d
     except Exception:
         return 0.0
 
