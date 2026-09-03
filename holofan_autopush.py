@@ -137,20 +137,50 @@ def _import_to_photos(video_path):
     return True
 
 
+# Click targets as fractions of the Holoscope window (fixed phone-shaped window,
+# so relative coords are reliable). Measured from the flow screenshots:
+#   home screen  -> "Transfer" / "Truyền tải" : bottom-right of the bottom bar
+#   popup        -> "Video"                    : centre, upper-middle
+#   Photos picker-> first (newest) thumbnail   : top-left cell of the grid
+#   edit screen  -> "确认" (green Confirm)      : lower-left of the card
+_STEPS = [
+    ("transfer_btn.png", 0.82, 0.955, 1.4),   # tap Transfer
+    ("video_btn.png",    0.50, 0.42,  1.8),   # tap Video in the popup
+    ("first_thumb.png",  0.25, 0.21,  1.8),   # tap newest video thumbnail
+    ("confirm_btn.png",  0.20, 0.64,  1.0),   # tap 确认 / Confirm
+]
+
+
+def _tap(name, rx, ry, wait):
+    """Click `name`.png if it's on screen, else click (rx, ry) inside the window."""
+    path = os.path.join(HERE, name)
+    if os.path.exists(path):
+        try:
+            loc = pyautogui.locateCenterOnScreen(path, confidence=0.7)
+            if loc:
+                pyautogui.click(loc)
+                time.sleep(wait)
+                return
+        except Exception:
+            pass
+    b = _holoscope_bounds()
+    if b:
+        x, y, w, h = b
+        pyautogui.click(x + int(w * rx), y + int(h * ry))
+    else:
+        sw, sh = pyautogui.size()
+        pyautogui.click(int(sw * rx), int(sh * ry))
+    time.sleep(wait)
+
+
 def upload_to_holoscope(video_path):
-    """Holoscope flow (confirmed from screenshots):
-        Transfer -> Video -> Photos picker -> newest video
-        -> edit screen -> 确认 (Confirm) -> uploads to the fan
+    """Holoscope 'Video' flow (from the flow screenshots):
+        Transfer -> Video -> Photos picker (newest thumbnail) -> 确认 -> fan
 
-    The "Video" option in the Transfer popup opens the Photos library, so the
-    received clip is imported to Photos first and is then the first thumbnail.
-
-    Button screenshots needed next to this script (crop tight, on the real Mac):
-        transfer_btn.png   "Transfer" / "Truyền tải" (bottom bar)
-        video_btn.png      the "Video" option in the Transfer popup
-        confirm_btn.png    the green "确认" / "Confirm" button on the edit screen
-    Optional:
-        first_thumb.png    top-left video thumbnail in the picker (else a fixed click)
+    Received clip is imported to Photos first so it's the top-left thumbnail.
+    Each step tries an image match (<name>.png next to this script) and falls
+    back to a window-relative click. Provide the PNGs for best reliability:
+        transfer_btn.png  video_btn.png  first_thumb.png  confirm_btn.png
     """
     if not _GUI:
         return
@@ -158,34 +188,12 @@ def upload_to_holoscope(video_path):
         print("[autopush] uploading to Holoscope...")
         try:
             _import_to_photos(video_path)
-
             if not _focus_holoscope():
-                print("[autopush] Holoscope window not found -- is it open & connected to the fan? Skipping.")
+                print("[autopush] Holoscope window not found -- open it & connect the fan. Skipping.")
                 return
-            _click_image("transfer_btn.png")
-            _click_image("video_btn.png", timeout=8)
-            time.sleep(2.0)                         # Photos picker opens
-
-            # pick the newest video = first thumbnail
-            try:
-                _click_image("first_thumb.png", timeout=6, confidence=0.6)
-            except Exception:
-                # fallback: first thumbnail ~13% from left, ~24% down INSIDE the
-                # Holoscope window (bounds from osascript; else whole screen).
-                b = _holoscope_bounds()
-                if b:
-                    x, y, w, h = b
-                    pyautogui.click(x + int(w * 0.13), y + int(h * 0.24))
-                else:
-                    sw, sh = pyautogui.size()
-                    pyautogui.click(int(sw * 0.13), int(sh * 0.24))
-            time.sleep(2.0)                         # edit screen loads
-
-            try:
-                _click_image("confirm_btn.png", timeout=8)
-            except Exception:
-                pyautogui.press("return")
-            print("[autopush] upload triggered -- watch Holoscope for the progress bar.")
+            for name, rx, ry, wait in _STEPS:
+                _tap(name, rx, ry, wait)
+            print("[autopush] upload triggered -- watch Holoscope for the progress bar / File count.")
         except Exception as e:
             print(f"[autopush] upload failed: {e}")
 
