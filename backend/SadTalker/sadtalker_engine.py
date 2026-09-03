@@ -77,10 +77,15 @@ def generate(
     expression_scale: float = 1.0,
     pose_style: int = 0,
     enhancer: str = "none",
-    batch_size: int = 2,
+    batch_size: int = None,
 ) -> str:
     """Run the full SadTalker pipeline in-process. Returns the path to the mp4
     written inside result_dir (named clip_name)."""
+    if batch_size is None:
+        try:
+            batch_size = int(os.environ.get("SADTALKER_BATCH_SIZE", "8"))
+        except ValueError:
+            batch_size = 8
     preprocess = preprocess if preprocess in ("crop", "extcrop", "full", "extfull", "resize") else "crop"
     enh = enhancer if enhancer and enhancer != "none" else None
 
