@@ -1569,7 +1569,11 @@ def _gemini_reply(system_instruction, history_messages, user_text, audio_bytes, 
     # Fastest first. Override with GEMINI_MODEL=... in .env to pin one.
     _pin = os.environ.get("GEMINI_MODEL", "").strip()
     models_to_try = [_pin] if _pin else ["gemini-2.5-flash-lite", "gemini-flash-latest", "gemini-2.5-flash"]
-    base_cfg = {"maxOutputTokens": 2048, "temperature": 0.7}
+    try:
+        _max_out = int(os.environ.get("AI_MAX_TOKENS", "512"))
+    except ValueError:
+        _max_out = 512
+    base_cfg = {"maxOutputTokens": _max_out, "temperature": 0.7}
     for model in models_to_try:
         url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={key}"
         res = None
@@ -1612,7 +1616,11 @@ def _claude_reply(system_instruction, history_messages, user_text, api_key):
     effort = os.environ.get("CLAUDE_EFFORT", "low")
     try:
         import anthropic
-        kwargs = dict(model=model, max_tokens=1024, system=system_instruction, messages=messages)
+        try:
+            _mt = int(os.environ.get("AI_MAX_TOKENS", "512"))
+        except ValueError:
+            _mt = 512
+        kwargs = dict(model=model, max_tokens=_mt, system=system_instruction, messages=messages)
         try:
             resp = client.messages.create(output_config={"effort": effort}, **kwargs)
         except TypeError:
@@ -1640,9 +1648,16 @@ def generate_gemini_response(user_message: str = None, audio_bytes: bytes = None
     import json
     provider = os.environ.get("AI_PROVIDER", "gemini").strip().lower()
 
+    # Shorter reply = shorter audio = much faster render. AI_BRIEF forces 1 short
+    # sentence (fastest, good for latency testing); default is 1-2 short sentences.
+    if os.environ.get("AI_BRIEF", "").strip() in ("1", "true", "yes"):
+        length_rule = "Trả lời CHỈ bằng 1 câu ngắn (dưới 15 từ)."
+    else:
+        length_rule = "Trả lời tự nhiên, thân thiện, rất cô đọng: chỉ 1-2 câu ngắn."
     system_instruction = (
-        "Bạn là một nhân vật AI đại diện ảo (Avatar) thông minh, sinh động, nói tiếng Việt. "
-        "Hãy trả lời tự nhiên, thân thiện và cô đọng (tốt nhất từ 2-4 câu) để phù hợp cho nhân vật nói chuyện trong clip video ngắn."
+        "Bạn là một nhân vật AI đại diện ảo (Avatar) nói tiếng Việt. "
+        "Câu trả lời sẽ được đọc to bằng giọng nói: viết như lời nói, không markdown, "
+        "không emoji, không ký hiệu, không chú thích trong ngoặc. " + length_rule
     )
     if persona and persona.strip():
         system_instruction += f"\n\nVai trò / Tính cách nhân vật của bạn: {persona.strip()}"
