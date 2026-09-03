@@ -613,6 +613,21 @@ function InputArea({
               <audio controls className="w-full" src={URL.createObjectURL(audioFile)} />
             </div>
           )}
+
+          {/* Type instead of speak -- goes to the AI just like a voice message */}
+          {!audioFile && (
+            <div>
+              <label className="block font-label text-[10px] text-outline mb-1">
+                OR TYPE A MESSAGE TO THE AI
+              </label>
+              <textarea
+                value={scriptText}
+                onChange={(e) => setScriptText(e.target.value)}
+                placeholder="Type here instead of recording — the avatar replies as the AI..."
+                className="w-full min-h-[70px] text-xs bg-black/40 rounded-xl border border-outline-variant/60 p-3 outline-none focus:border-secondary resize-none transition-colors custom-scrollbar"
+              />
+            </div>
+          )}
         </div>
       )}
 

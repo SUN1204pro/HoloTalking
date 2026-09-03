@@ -95,11 +95,15 @@ function App() {
     return () => { stop = true; };
   }, []);
 
+  // In LIVE_MIC you can either record OR type a message to the AI.
+  const liveTextMode = activeTab === "LIVE_MIC" && !audioFile && scriptText.trim().length >= 2;
+
   const isGenerateReady =
     !serverWarming &&
     selectedImage &&
     ((activeTab === "TEXT" && scriptText.trim().length >= 3) ||
-      ((activeTab === "AUDIO" || activeTab === "LIVE_MIC") && audioFile !== null));
+      (activeTab === "AUDIO" && audioFile !== null) ||
+      (activeTab === "LIVE_MIC" && (audioFile !== null || liveTextMode)));
 
   // --- FUNCTIONS ---
   const handleImageUpload = (event) => {
@@ -243,12 +247,14 @@ function App() {
         }
       }
 
-      if (activeTab === "TEXT") {
+      if (activeTab === "TEXT" || liveTextMode) {
+        // TEXT tab, or LIVE_MIC with a typed message instead of a recording.
+        const ai = liveTextMode || useGemini;   // live-mode typing always goes to the AI
         formData.append("inputType", "text");
         formData.append("text", scriptText);
         formData.append("voice_name", selectedVoice);
-        formData.append("use_gemini", useGemini ? "true" : "false");
-        if (useGemini && persona.trim()) formData.append("persona", persona.trim());
+        formData.append("use_gemini", ai ? "true" : "false");
+        if (ai && persona.trim()) formData.append("persona", persona.trim());
       } else {
         formData.append("inputType", "audio");
         formData.append("audio", targetAudio);
