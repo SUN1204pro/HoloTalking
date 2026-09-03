@@ -1,10 +1,15 @@
-"""One-command Windows bridge: receive generated videos from the backend and
-auto-upload each one into the Holoscope desktop app.
+"""One-command bridge: poll the backend for each new generated video and
+auto-upload it into the Holoscope desktop app.
+
+Talks to the backend over plain HTTP only (the API) -- no socket, no port 9999.
+It polls  GET /api/latest_video  and, when the `version` changes, downloads
+GET /api/latest_video/download  and drives Holoscope.
 
 Run on the Windows OR macOS machine that has Holoscope installed:
 
     pip install pyautogui pillow opencv-python
-    python holofan_autopush.py 192.168.0.107        # <- backend LAN IP
+    python holofan_autopush.py http://127.0.0.1:8000     # via the SSH tunnel
+    python holofan_autopush.py 192.168.0.107             # or a bare IP (assumes :8000)
 
 macOS only: System Settings -> Privacy & Security -> grant your terminal both
 "Accessibility" and "Screen Recording", or clicks and image search do nothing.
@@ -30,13 +35,9 @@ window-relative fallback positions (tune the fractions in the code if off).
 import os
 import sys
 import time
-import socket
-import struct
 import threading
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-PORT = 9999
-CHUNK = 64144
 OUT_FILE = os.path.join(HERE, "received_holofan_video.mp4")
 HOLOSCOPE_WINDOW_HINT = "Holoscope"          # window title substring
 
@@ -220,39 +221,51 @@ def upload_to_holoscope(video_path):
             print(f"[autopush] upload failed: {e}")
 
 
-# --- socket receiver -------------------------------------------------------
-def receive_loop(server_ip):
+# --- API polling ---------------------------------------------------------
+import urllib.request
+
+POLL_SECONDS = 2.0
+
+
+def _http_json(url, timeout=8):
+    with urllib.request.urlopen(url, timeout=timeout) as r:
+        import json
+        return json.load(r)
+
+
+def _download(url, dest, timeout=120):
+    with urllib.request.urlopen(url, timeout=timeout) as r, open(dest, "wb") as f:
+        while True:
+            chunk = r.read(65536)
+            if not chunk:
+                break
+            f.write(chunk)
+
+
+def poll_loop(base_url):
+    """Poll <base>/api/latest_video. When its `version` changes, download the clip
+    and hand it to Holoscope. Pure HTTP -- no socket, only the API."""
+    base_url = base_url.rstrip("/")
+    print(f"[autopush] polling {base_url}/api/latest_video every {POLL_SECONDS}s ...")
+    last_version = None
     while True:
         try:
-            s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            s.connect((server_ip, PORT))
-            print(f"[autopush] connected to {server_ip}:{PORT}, waiting for videos...")
-            while True:
-                header = b""
-                while len(header) < 8:
-                    chunk = s.recv(8 - len(header))
-                    if not chunk:
-                        raise ConnectionError("server closed")
-                    header += chunk
-                size = struct.unpack("!Q", header)[0]
-                if size == 0:
-                    continue
-                got = 0
-                with open(OUT_FILE, "wb") as f:
-                    while got < size:
-                        chunk = s.recv(min(CHUNK, size - got))
-                        if not chunk:
-                            raise ConnectionError("server closed mid-transfer")
-                        f.write(chunk)
-                        got += len(chunk)
-                print(f"[autopush] received {got} bytes -> {OUT_FILE}")
-                threading.Thread(target=upload_to_holoscope, args=(OUT_FILE,), daemon=True).start()
+            info = _http_json(f"{base_url}/api/latest_video")
+            if info.get("available") and info.get("version") != last_version:
+                if last_version is not None:      # skip the clip that already existed at startup
+                    print(f"[autopush] new video (v={info['version']}, {info.get('size')} bytes) -- downloading")
+                    _download(f"{base_url}/api/latest_video/download", OUT_FILE)
+                    print(f"[autopush] saved -> {OUT_FILE}")
+                    threading.Thread(target=upload_to_holoscope, args=(OUT_FILE,), daemon=True).start()
+                last_version = info["version"]
         except Exception as e:
-            print(f"[autopush] connection error: {e}. Reconnecting in 3s...")
-            time.sleep(3)
+            print(f"[autopush] poll error: {e}")
+        time.sleep(POLL_SECONDS)
 
 
 if __name__ == "__main__":
-    ip = sys.argv[1] if len(sys.argv) > 1 else "127.0.0.1"
-    print(f"[autopush] backend = {ip}   gui_upload = {_GUI}")
-    receive_loop(ip)
+    arg = sys.argv[1] if len(sys.argv) > 1 else "http://127.0.0.1:8000"
+    if not arg.startswith("http"):
+        arg = f"http://{arg}:8000"        # allow just an IP for convenience
+    print(f"[autopush] backend = {arg}   gui_upload = {_GUI}")
+    poll_loop(arg)

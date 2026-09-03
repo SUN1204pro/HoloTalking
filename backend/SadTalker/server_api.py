@@ -16,7 +16,7 @@ from datetime import datetime
 from fastapi import FastAPI, UploadFile, File, Form, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import StreamingResponse
+from fastapi.responses import StreamingResponse, FileResponse
 import requests
 import io
 from src.utils.wav2lip_processor import process_wav2lip
@@ -658,6 +658,36 @@ def health_check():
         "warmup_error": _warm_state["error"],
         "timestamp": datetime.now().isoformat()
     }
+
+
+_LATEST_VIDEO_PATHS = ("../../result/latest_result.mp4", "result/latest_result.mp4")
+
+
+def _latest_video_file():
+    for p in _LATEST_VIDEO_PATHS:
+        if os.path.exists(p) and os.path.getsize(p) > 0:
+            return p
+    return None
+
+
+@app.get("/api/latest_video")
+def latest_video_info():
+    """Lightweight poll target for the fan bridge: a `version` string that changes
+    whenever a new talking clip is produced. Poll this; when `version` changes,
+    GET /api/latest_video/download."""
+    p = _latest_video_file()
+    if not p:
+        return {"available": False}
+    st = os.stat(p)
+    return {"available": True, "version": f"{int(st.st_mtime)}-{st.st_size}", "size": st.st_size}
+
+
+@app.get("/api/latest_video/download")
+def latest_video_download():
+    p = _latest_video_file()
+    if not p:
+        raise HTTPException(status_code=404, detail="No video generated yet.")
+    return FileResponse(p, media_type="video/mp4", filename="latest_result.mp4")
 
 
 @app.get("/api/voices")
