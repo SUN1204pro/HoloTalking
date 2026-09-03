@@ -144,9 +144,9 @@ def _import_to_photos(video_path):
 #   Photos picker-> first (newest) thumbnail   : top-left cell of the grid
 #   edit screen  -> "确认" (green Confirm)      : lower-left of the card
 _STEPS = [
-    ("transfer_btn.png", 0.82, 0.955, 1.4),   # tap Transfer
-    ("video_btn.png",    0.50, 0.42,  1.8),   # tap Video in the popup
-    ("first_thumb.png",  0.25, 0.21,  1.8),   # tap newest video thumbnail
+    ("transfer_btn.png", 0.82, 0.955, 1.4),   # tap Transfer / Truyền tải  (bottom bar)
+    ("local_btn.png",    0.72, 0.42,  1.8),   # tap Địa phương (Local, folder icon, RIGHT of the popup)
+    ("first_thumb.png",  0.25, 0.21,  1.8),   # tap newest video thumbnail (top-left of picker)
     ("confirm_btn.png",  0.20, 0.64,  1.0),   # tap 确认 / Confirm
 ]
 
