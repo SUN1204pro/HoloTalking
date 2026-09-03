@@ -121,18 +121,18 @@ def _focus_holoscope():
 def _import_to_photos(video_path):
     """Holoscope's 'Local' picker reads the macOS Photos library, not the disk.
     Import the freshly received video into Photos so it's the newest item."""
-    script = f'''
-    set f to POSIX file "{video_path}"
-    tell application "Photos"
-        import (f as alias list) skip check duplicates yes
-    end tell
-    '''
+    script = (
+        f'set f to (POSIX file "{video_path}") as alias\n'
+        'tell application "Photos"\n'
+        '    import {f} skip check duplicates yes\n'
+        'end tell\n'
+    )
     import subprocess
     r = subprocess.run(["osascript", "-e", script], capture_output=True, text=True)
     if r.returncode != 0:
         print(f"[autopush] Photos import failed: {r.stderr.strip()}")
         return False
-    print("[autopush] imported to Photos")
+    print(f"[autopush] imported to Photos ({r.stdout.strip()})")
     time.sleep(2.0)                                 # let Photos finish indexing
     return True
 
