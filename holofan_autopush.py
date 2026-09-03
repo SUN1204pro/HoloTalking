@@ -68,6 +68,28 @@ def _click_image(name, timeout=15, confidence=0.8):
     raise TimeoutError(f"could not find {name} on screen")
 
 
+def _holoscope_bounds():
+    """(x, y, w, h) of the Holoscope window on macOS, or None."""
+    if sys.platform != "darwin":
+        return None
+    import subprocess
+    scr = f'''
+    tell application "System Events"
+        tell process "{HOLOSCOPE_WINDOW_HINT}"
+            set p to position of window 1
+            set s to size of window 1
+            return (item 1 of p as text) & "," & (item 2 of p as text) & "," & (item 1 of s as text) & "," & (item 2 of s as text)
+        end tell
+    end tell
+    '''
+    try:
+        out = subprocess.run(["osascript", "-e", scr], capture_output=True, text=True, timeout=5)
+        x, y, w, h = (int(float(v)) for v in out.stdout.strip().split(","))
+        return (x, y, w, h)
+    except Exception:
+        return None
+
+
 def _focus_holoscope():
     if sys.platform == "darwin":
         # macOS: focus via AppleScript (pygetwindow doesn't work here).
@@ -148,10 +170,15 @@ def upload_to_holoscope(video_path):
             try:
                 _click_image("first_thumb.png", timeout=6, confidence=0.6)
             except Exception:
-                # fallback: first thumbnail sits ~12% from left, ~22% down inside
-                # the Holoscope window; adjust if your window is a different size.
-                w, h = pyautogui.size()
-                pyautogui.click(int(w * 0.12), int(h * 0.22))
+                # fallback: first thumbnail ~13% from left, ~24% down INSIDE the
+                # Holoscope window (bounds from osascript; else whole screen).
+                b = _holoscope_bounds()
+                if b:
+                    x, y, w, h = b
+                    pyautogui.click(x + int(w * 0.13), y + int(h * 0.24))
+                else:
+                    sw, sh = pyautogui.size()
+                    pyautogui.click(int(sw * 0.13), int(sh * 0.24))
             time.sleep(2.0)                         # edit screen loads
 
             try:
