@@ -263,9 +263,33 @@ def poll_loop(base_url):
         time.sleep(POLL_SECONDS)
 
 
+FREEZE_FILE = os.path.join(HERE, "freeze.mp4")
+
+
+def setup_freeze(base_url, seconds=30):
+    """One-shot: download the idle/freeze clip and upload it to Holoscope
+    (put it in slot 1 of the fan playlist, then run without --setup for the
+    talking clip in slot 2)."""
+    base_url = base_url.rstrip("/")
+    url = f"{base_url}/api/freeze_video/download?seconds={seconds}"
+    print(f"[setup] downloading freeze clip ({seconds}s) from {url}")
+    _download(url, FREEZE_FILE)
+    print(f"[setup] saved -> {FREEZE_FILE}")
+    print("[setup] tap the slot you want in Holoscope, then it will upload...")
+    time.sleep(4)
+    upload_to_holoscope(FREEZE_FILE)
+    print("[setup] freeze clip sent. Now generate your talking clip in the browser,")
+    print("[setup] tap the next slot in Holoscope, and run this script WITHOUT --setup.")
+
+
 if __name__ == "__main__":
-    arg = sys.argv[1] if len(sys.argv) > 1 else "http://127.0.0.1:8000"
+    args = [a for a in sys.argv[1:] if a != "--setup"]
+    is_setup = "--setup" in sys.argv
+    arg = args[0] if args else "http://127.0.0.1:8000"
     if not arg.startswith("http"):
         arg = f"http://{arg}:8000"        # allow just an IP for convenience
-    print(f"[autopush] backend = {arg}   gui_upload = {_GUI}")
-    poll_loop(arg)
+    print(f"[autopush] backend = {arg}   gui_upload = {_GUI}   mode = {'setup' if is_setup else 'poll'}")
+    if is_setup:
+        setup_freeze(arg)
+    else:
+        poll_loop(arg)

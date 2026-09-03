@@ -690,6 +690,32 @@ def latest_video_download():
     return FileResponse(p, media_type="video/mp4", filename="latest_result.mp4")
 
 
+@app.get("/api/freeze_video/download")
+def freeze_video_download(seconds: int = 30):
+    """The 'idle' clip for the fan: the current avatar (black background) held as a
+    still MP4 for `seconds`. Built on demand from the most recent preprocessed
+    avatar; used once at system setup for slot 1 of the fan playlist."""
+    img = _last_avatar_image_path
+    if not img or not os.path.exists(img):
+        cands = sorted(glob.glob("avatar_cache/*.png"), key=os.path.getmtime, reverse=True)
+        img = cands[0] if cands else None
+    if not img or not os.path.exists(img):
+        raise HTTPException(status_code=404, detail="No avatar processed yet -- pick an avatar first.")
+    out = os.path.join("temp_files", "freeze_setup.mp4")
+    os.makedirs("temp_files", exist_ok=True)
+    seconds = max(1, min(60, seconds))
+    cmd = (
+        f'ffmpeg -y -hide_banner -loglevel error -loop 1 -i "{img}" -t {seconds} '
+        f'-vf "scale=trunc(iw/2)*2:trunc(ih/2)*2,format=yuv420p" '
+        f'-r 25 -c:v libx264 -pix_fmt yuv420p -movflags +faststart "{out}"'
+    )
+    try:
+        subprocess.run(cmd, shell=True, check=True)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"ffmpeg failed: {e}")
+    return FileResponse(out, media_type="video/mp4", filename="freeze.mp4")
+
+
 @app.get("/api/voices")
 def get_voices():
     """Returns available Vietneu preset voices with metadata."""
