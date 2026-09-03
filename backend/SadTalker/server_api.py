@@ -1395,7 +1395,10 @@ def _get_whisper():
                     try:
                         from faster_whisper import WhisperModel
                         name = model_id or "large-v3"
-                        ct2_dev = "cuda" if device == "cuda" else "cpu"
+                        # STT_DEVICE=cpu keeps Whisper off the GPU (saves 1-3 GB VRAM
+                        # for the video render); on CPU faster-whisper int8 is still ~1-2s.
+                        stt_dev = os.environ.get("STT_DEVICE", "").strip().lower()
+                        ct2_dev = stt_dev if stt_dev in ("cuda", "cpu") else ("cuda" if device == "cuda" else "cpu")
                         ctype = "float16" if ct2_dev == "cuda" else "int8"
                         print(f"[Whisper] faster-whisper {name} on {ct2_dev} ({ctype})...")
                         _whisper_pipe = WhisperModel(name, device=ct2_dev, compute_type=ctype)
