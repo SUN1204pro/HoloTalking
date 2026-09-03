@@ -13,17 +13,19 @@ Set HOLOSCOPE_WINDOW_HINT below to the exact app name shown in the menu bar.
 What it does:
   1. Connects to the backend's socket streamer (port 9999) and saves every
      pushed MP4 to received_holofan_video.mp4 (overwritten each time).
-  2. After each new video, drives the Holoscope window:
-        Transfer -> Local -> (type the file path) -> Upload/confirm
-     Clicks are anchored to button screenshots so they survive the app moving
-     things around.
+  2. After each new video, drives Holoscope to upload it to the fan.
 
-ONE-TIME SETUP -- put these PNGs next to this script (crop them from a Holoscope
-screenshot; small tight crops of each button):
-    transfer_btn.png     the "Transfer" button
-    local_btn.png        the "Local" button/tab
-    upload_confirm.png    the final upload/confirm button
-Run Windows at a fixed resolution and 100% display scaling.
+     WINDOWS (recommended - real file dialog):
+        Truyền tải / Transfer -> type the file path -> Open
+        -> Bắt đầu chuyển / Start transfer -> Xác nhận / Confirm -> % to 100
+     macOS (wrapped iOS app - the Photos picker is often broken, avoid):
+        Transfer -> Video -> newest Photos item -> 确认
+
+ONE-TIME SETUP -- optional tight button crops next to this script make it robust:
+    WINDOWS:  transfer_btn.png  start_transfer_btn.png  confirm_btn.png
+    macOS:    transfer_btn.png  video_btn.png  first_thumb.png  confirm_btn.png
+Run at a fixed resolution / 100% display scaling. Without the PNGs it clicks
+window-relative fallback positions (tune the fractions in the code if off).
 """
 import os
 import sys
@@ -69,7 +71,16 @@ def _click_image(name, timeout=15, confidence=0.8):
 
 
 def _holoscope_bounds():
-    """(x, y, w, h) of the Holoscope window on macOS, or None."""
+    """(x, y, w, h) of the Holoscope window, or None."""
+    if sys.platform.startswith("win"):
+        try:
+            wins = pyautogui.getWindowsWithTitle(HOLOSCOPE_WINDOW_HINT)
+            if wins:
+                w = wins[0]
+                return (w.left, w.top, w.width, w.height)
+        except Exception:
+            pass
+        return None
     if sys.platform != "darwin":
         return None
     import subprocess
@@ -118,49 +129,15 @@ def _focus_holoscope():
     return False
 
 
-def _import_to_photos(video_path):
-    """Holoscope's 'Local' picker reads the macOS Photos library, not the disk.
-    Import the freshly received video into Photos so it's the newest item."""
-    script = (
-        f'set f to (POSIX file "{video_path}") as alias\n'
-        'tell application "Photos"\n'
-        '    import {f} skip check duplicates yes\n'
-        'end tell\n'
-    )
-    import subprocess
-    r = subprocess.run(["osascript", "-e", script], capture_output=True, text=True)
-    if r.returncode != 0:
-        print(f"[autopush] Photos import failed: {r.stderr.strip()}")
-        return False
-    print(f"[autopush] imported to Photos ({r.stdout.strip()})")
-    time.sleep(2.0)                                 # let Photos finish indexing
-    return True
-
-
-# Click targets as fractions of the Holoscope window (fixed phone-shaped window,
-# so relative coords are reliable). Measured from the flow screenshots:
-#   home screen  -> "Transfer" / "Truyền tải" : bottom-right of the bottom bar
-#   popup        -> "Video"                    : centre, upper-middle
-#   Photos picker-> first (newest) thumbnail   : top-left cell of the grid
-#   edit screen  -> "确认" (green Confirm)      : lower-left of the card
-_STEPS = [
-    ("transfer_btn.png", 0.82, 0.955, 1.4),   # tap Transfer / Truyền tải  (bottom bar)
-    ("video_btn.png",    0.50, 0.42,  2.0),   # tap Video (MIDDLE of the popup) -> opens Photos picker
-    ("first_thumb.png",  0.24, 0.21,  2.0),   # tap newest video = top-left thumbnail
-    ("confirm_btn.png",  0.20, 0.64,  1.0),   # tap 确认 / Confirm on the proportion screen
-]
-
-
-def _tap(name, rx, ry, wait):
-    """Click `name`.png if it's on screen, else click (rx, ry) inside the window."""
-    path = os.path.join(HERE, name)
-    if os.path.exists(path):
+def _click_or(name, rx, ry, wait, conf=0.7):
+    """Click <name>.png if on screen, else click (rx, ry) as a fraction of the
+    Holoscope window (falls back to whole screen if window bounds unknown)."""
+    p = os.path.join(HERE, name)
+    if os.path.exists(p):
         try:
-            loc = pyautogui.locateCenterOnScreen(path, confidence=0.7)
+            loc = pyautogui.locateCenterOnScreen(p, confidence=conf)
             if loc:
-                pyautogui.click(loc)
-                time.sleep(wait)
-                return
+                pyautogui.click(loc); time.sleep(wait); return
         except Exception:
             pass
     b = _holoscope_bounds()
@@ -173,27 +150,72 @@ def _tap(name, rx, ry, wait):
     time.sleep(wait)
 
 
-def upload_to_holoscope(video_path):
-    """Holoscope 'Video' flow (from the flow screenshots):
-        Transfer -> Video -> Photos picker (newest thumbnail) -> 确认 -> fan
+def _upload_windows(video_path):
+    """Windows Holoscope 'Truyền tải / Transfer' flow (confirmed from screenshots):
+        Transfer -> Windows file dialog (type path, Open)
+        -> trim screen -> 'Bắt đầu chuyển' (Start transfer)
+        -> filename dialog -> 'Xác nhận' (Confirm)  -> progress to 100%
 
-    Received clip is imported to Photos first so it's the top-left thumbnail.
-    Each step tries an image match (<name>.png next to this script) and falls
-    back to a window-relative click. Provide the PNGs for best reliability:
-        transfer_btn.png  video_btn.png  first_thumb.png  confirm_btn.png
+    Optional button PNGs next to this script (crop on the real Windows screen):
+        transfer_btn.png  start_transfer_btn.png  confirm_btn.png
     """
+    print("[autopush] uploading via Windows Holoscope...")
+    _focus_holoscope()
+    time.sleep(0.6)
+
+    # 1. open the Transfer file dialog (bottom bar, centre-ish)
+    _click_or("transfer_btn.png", 0.74, 0.95, 1.6)
+
+    # 2. Windows file-open dialog: the "File name" box already has focus.
+    #    Select-all (in case of leftover text), type the full path, Enter = Open.
+    time.sleep(0.5)
+    pyautogui.hotkey("ctrl", "a")
+    pyautogui.write(video_path, interval=0.005)
+    time.sleep(0.3)
+    pyautogui.press("enter")
+    time.sleep(2.0)
+
+    # 3. trim/preview screen -> "Bắt đầu chuyển" (Start transfer), green, bottom-right
+    _click_or("start_transfer_btn.png", 0.88, 0.90, 1.5)
+
+    # 4. filename dialog -> "Xác nhận" (Confirm), left button
+    _click_or("confirm_btn.png", 0.47, 0.63, 1.0)
+
+    print("[autopush] transfer started -- watch the % bar in Holoscope.")
+
+
+def _upload_mac(video_path):
+    """macOS wrapped-iOS Holoscope: Transfer -> Video (Photos) -> newest -> 确认.
+    Fragile -- the Photos picker is often broken in the wrapped app. Prefer Windows."""
+    script = (
+        f'set f to (POSIX file "{video_path}") as alias\n'
+        'tell application "Photos"\n'
+        '    import {f} skip check duplicates yes\n'
+        'end tell\n'
+    )
+    import subprocess
+    subprocess.run(["osascript", "-e", script], capture_output=True, text=True)
+    time.sleep(2.0)
+    _focus_holoscope()
+    for name, rx, ry, wait in (
+        ("transfer_btn.png", 0.82, 0.955, 1.4),
+        ("video_btn.png",    0.50, 0.42,  2.0),
+        ("first_thumb.png",  0.24, 0.21,  2.0),
+        ("confirm_btn.png",  0.20, 0.64,  1.0),
+    ):
+        _click_or(name, rx, ry, wait)
+    print("[autopush] upload triggered (mac) -- watch Holoscope.")
+
+
+def upload_to_holoscope(video_path):
     if not _GUI:
         return
     with _upload_lock:
-        print("[autopush] uploading to Holoscope...")
         try:
-            _import_to_photos(video_path)
-            if not _focus_holoscope():
-                print("[autopush] Holoscope window not found -- open it & connect the fan. Skipping.")
-                return
-            for name, rx, ry, wait in _STEPS:
-                _tap(name, rx, ry, wait)
-            print("[autopush] upload triggered -- watch Holoscope for the progress bar / File count.")
+            if sys.platform.startswith("win"):
+                _upload_windows(video_path)
+            else:
+                _upload_mac(video_path)
         except Exception as e:
             print(f"[autopush] upload failed: {e}")
 
