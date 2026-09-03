@@ -96,47 +96,68 @@ def _focus_holoscope():
     return False
 
 
-def upload_to_holoscope(video_path):
-    """Holoscope 'Local' flow (from the app manual):
-        Transfer -> Local (Địa phương) -> pick the video file -> Confirm -> upload
+def _import_to_photos(video_path):
+    """Holoscope's 'Local' picker reads the macOS Photos library, not the disk.
+    Import the freshly received video into Photos so it's the newest item."""
+    script = f'''
+    set f to POSIX file "{video_path}"
+    tell application "Photos"
+        import (f as alias list) skip check duplicates yes
+    end tell
+    '''
+    import subprocess
+    r = subprocess.run(["osascript", "-e", script], capture_output=True, text=True)
+    if r.returncode != 0:
+        print(f"[autopush] Photos import failed: {r.stderr.strip()}")
+        return False
+    print("[autopush] imported to Photos")
+    time.sleep(2.0)                                 # let Photos finish indexing
+    return True
 
-    Button screenshots needed next to this script (crop tight on the actual Mac):
-        transfer_btn.png   the "Transfer" / "Truyền tải" button (bottom bar)
-        local_btn.png      the "Địa phương" (folder) button in the Transfer popup
-        confirm_btn.png    the confirm/OK button after selecting the file
-    In the macOS file picker the script presses Cmd+Shift+G and types the folder,
-    then Return twice (open folder, then the file must already be selected/typed).
-    If your picker layout differs, screenshot it and tell me.
+
+def upload_to_holoscope(video_path):
+    """Holoscope 'Local' flow (confirmed from screenshots):
+        Transfer -> Local (本地/Địa phương) -> Photos picker -> newest video
+        -> edit screen -> 确认 (Confirm) -> uploads to the fan
+
+    The picker shows the Photos library, so the video is imported to Photos first
+    and then it's the first (top-left) thumbnail.
+
+    Button screenshots needed next to this script (crop tight, on the real Mac):
+        transfer_btn.png   "Transfer" / "Truyền tải" (bottom bar)
+        local_btn.png      "Local" / "本地" / "Địa phương" (folder icon in the popup)
+        confirm_btn.png    the green "确认" / "Confirm" button on the edit screen
+    Optional:
+        first_thumb.png    top-left video thumbnail in the picker (else a fixed click)
     """
     if not _GUI:
         return
     with _upload_lock:
         print("[autopush] uploading to Holoscope...")
         try:
+            _import_to_photos(video_path)
+
             if not _focus_holoscope():
-                print("[autopush] Holoscope window not found -- is the app open & connected to the fan? Skipping.")
+                print("[autopush] Holoscope window not found -- is it open & connected to the fan? Skipping.")
                 return
             _click_image("transfer_btn.png")
             _click_image("local_btn.png", timeout=8)
-            time.sleep(1.5)                        # file picker opens
+            time.sleep(2.0)                         # Photos picker opens
 
-            # macOS "go to folder" then type the filename
-            folder = os.path.dirname(video_path)
-            fname = os.path.basename(video_path)
-            pyautogui.hotkey("command", "shift", "g")
-            time.sleep(0.6)
-            pyautogui.write(folder + "/", interval=0.01)
-            pyautogui.press("return")
-            time.sleep(0.8)
-            pyautogui.write(fname, interval=0.01)  # jumps to the file in the list
-            time.sleep(0.4)
-            pyautogui.press("return")             # open/select it
-            time.sleep(1.2)
+            # pick the newest video = first thumbnail
+            try:
+                _click_image("first_thumb.png", timeout=6, confidence=0.6)
+            except Exception:
+                # fallback: first thumbnail sits ~12% from left, ~22% down inside
+                # the Holoscope window; adjust if your window is a different size.
+                w, h = pyautogui.size()
+                pyautogui.click(int(w * 0.12), int(h * 0.22))
+            time.sleep(2.0)                         # edit screen loads
 
             try:
-                _click_image("confirm_btn.png", timeout=6)
+                _click_image("confirm_btn.png", timeout=8)
             except Exception:
-                pyautogui.press("return")         # some builds auto-confirm
+                pyautogui.press("return")
             print("[autopush] upload triggered -- watch Holoscope for the progress bar.")
         except Exception as e:
             print(f"[autopush] upload failed: {e}")
