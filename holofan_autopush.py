@@ -97,22 +97,47 @@ def _focus_holoscope():
 
 
 def upload_to_holoscope(video_path):
+    """Holoscope 'Local' flow (from the app manual):
+        Transfer -> Local (Địa phương) -> pick the video file -> Confirm -> upload
+
+    Button screenshots needed next to this script (crop tight on the actual Mac):
+        transfer_btn.png   the "Transfer" / "Truyền tải" button (bottom bar)
+        local_btn.png      the "Địa phương" (folder) button in the Transfer popup
+        confirm_btn.png    the confirm/OK button after selecting the file
+    In the macOS file picker the script presses Cmd+Shift+G and types the folder,
+    then Return twice (open folder, then the file must already be selected/typed).
+    If your picker layout differs, screenshot it and tell me.
+    """
     if not _GUI:
         return
     with _upload_lock:
         print("[autopush] uploading to Holoscope...")
         try:
             if not _focus_holoscope():
-                print("[autopush] Holoscope window not found -- is the app open? Skipping upload.")
+                print("[autopush] Holoscope window not found -- is the app open & connected to the fan? Skipping.")
                 return
             _click_image("transfer_btn.png")
-            _click_image("local_btn.png")
-            time.sleep(1.2)                       # wait for the OS file dialog
-            pyautogui.write(video_path, interval=0.01)
-            pyautogui.press("enter")
-            time.sleep(1.5)
-            _click_image("upload_confirm.png")
-            print("[autopush] upload triggered.")
+            _click_image("local_btn.png", timeout=8)
+            time.sleep(1.5)                        # file picker opens
+
+            # macOS "go to folder" then type the filename
+            folder = os.path.dirname(video_path)
+            fname = os.path.basename(video_path)
+            pyautogui.hotkey("command", "shift", "g")
+            time.sleep(0.6)
+            pyautogui.write(folder + "/", interval=0.01)
+            pyautogui.press("return")
+            time.sleep(0.8)
+            pyautogui.write(fname, interval=0.01)  # jumps to the file in the list
+            time.sleep(0.4)
+            pyautogui.press("return")             # open/select it
+            time.sleep(1.2)
+
+            try:
+                _click_image("confirm_btn.png", timeout=6)
+            except Exception:
+                pyautogui.press("return")         # some builds auto-confirm
+            print("[autopush] upload triggered -- watch Holoscope for the progress bar.")
         except Exception as e:
             print(f"[autopush] upload failed: {e}")
 
