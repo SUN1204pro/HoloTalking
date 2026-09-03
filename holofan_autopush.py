@@ -116,16 +116,16 @@ def _import_to_photos(video_path):
 
 
 def upload_to_holoscope(video_path):
-    """Holoscope 'Local' flow (confirmed from screenshots):
-        Transfer -> Local (本地/Địa phương) -> Photos picker -> newest video
+    """Holoscope flow (confirmed from screenshots):
+        Transfer -> Video -> Photos picker -> newest video
         -> edit screen -> 确认 (Confirm) -> uploads to the fan
 
-    The picker shows the Photos library, so the video is imported to Photos first
-    and then it's the first (top-left) thumbnail.
+    The "Video" option in the Transfer popup opens the Photos library, so the
+    received clip is imported to Photos first and is then the first thumbnail.
 
     Button screenshots needed next to this script (crop tight, on the real Mac):
         transfer_btn.png   "Transfer" / "Truyền tải" (bottom bar)
-        local_btn.png      "Local" / "本地" / "Địa phương" (folder icon in the popup)
+        video_btn.png      the "Video" option in the Transfer popup
         confirm_btn.png    the green "确认" / "Confirm" button on the edit screen
     Optional:
         first_thumb.png    top-left video thumbnail in the picker (else a fixed click)
@@ -141,7 +141,7 @@ def upload_to_holoscope(video_path):
                 print("[autopush] Holoscope window not found -- is it open & connected to the fan? Skipping.")
                 return
             _click_image("transfer_btn.png")
-            _click_image("local_btn.png", timeout=8)
+            _click_image("video_btn.png", timeout=8)
             time.sleep(2.0)                         # Photos picker opens
 
             # pick the newest video = first thumbnail
