@@ -201,7 +201,7 @@ FREEZE_ROW_XY     = _xy("HOLO_FREEZE_ROW_XY",     "0.200,0.256")  # File List ro
 TALK_ROW_XY       = _xy("HOLO_TALK_ROW_XY",       "0.200,0.313")  # File List row holding the talking clip
 START_TRANSCODE_XY= _xy("HOLO_START_XY",          "0.640,0.852")  # "Start Transcode" (measured 1800x1500 on 2814x1760)
 NAME_FIELD_XY     = _xy("HOLO_NAMEFIELD_XY",      "0.500,0.455")  # text box on the File Name dialog (measured 1407x800)
-NAME_OK_XY        = _xy("HOLO_NAMEOK_XY",         "0.400,0.585")  # green "OK" on the File Name dialog
+NAME_OK_XY        = _xy("HOLO_NAMEOK_XY",         "0.426,0.511")  # "OK" on the File Name dialog (measured 1200x900)
 TRANSCODE_WAIT    = float(os.environ.get("HOLO_TRANSCODE_WAIT", "120"))  # seconds to let transcoding finish
 
 
