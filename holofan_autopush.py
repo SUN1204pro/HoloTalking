@@ -15,29 +15,24 @@ macOS only: System Settings -> Privacy & Security -> grant your terminal both
 "Accessibility" and "Screen Recording", or clicks and image search do nothing.
 Set HOLOSCOPE_WINDOW_HINT below to the exact app name shown in the menu bar.
 
-Two fan playlist slots:
-    slot 1 = FREEZE (idle avatar)      slot 2 = TALK (latest reply)
-
   python holofan_autopush.py <url> --setup
-      build the 30s freeze clip and put it in slot 1 (do this once, after
-      picking an avatar in the browser)
+      download the short freeze clip and transcode+Send it to the fan once
+      (do this after picking an avatar in the browser)
 
   python holofan_autopush.py <url>
-      run the state loop: while idle/generating the fan shows slot 1; each new
-      reply is uploaded to slot 2 and played for its duration, then back to slot 1.
+      poll loop: every new talking clip is transcoded + Sent to the fan
 
-WINDOWS (recommended - real file dialog):
-    [tap slot] -> Truyền tải/Transfer -> type path -> Open
-    -> Bắt đầu chuyển/Start transfer -> Xác nhận/Confirm -> % to 100
-    switching which slot plays = one tap on that playlist row.
+WINDOWS Holoscope (PD42 build) flow, all automated:
+    Transcode -> file dialog (Ctrl+L, type full path, Enter)
+    -> Start Transcode -> "File Name" dialog -> OK
+    -> wait, scroll file list to bottom, click the new row -> Send
 macOS (wrapped iOS app - the Photos picker is often broken, avoid).
 
-Optional tight button crops next to this script (crop on the real screen):
-    transfer_btn.png  start_transfer_btn.png  confirm_btn.png
-    slot_1.png slot_2.png  slot_1_play.png slot_2_play.png
-Without them it clicks window-relative fallback positions -- tune with env vars
-HOLO_SLOT_X / HOLO_SLOT_Y0 / HOLO_SLOT_DY (fractions of the Holoscope window).
-Run at a fixed resolution / 100% display scaling.
+MAXIMISE the Holoscope window and keep it maximised. If a click misses, tune the
+coordinates with env vars (fractions of the window):
+    HOLO_TRANSCODE_XY  HOLO_START_XY  HOLO_NAMEOK_XY  HOLO_NEWFILE_XY  HOLO_SEND_XY
+    HOLO_TRANSCODE_WAIT (seconds to let transcoding finish, default 12)
+Run at 100% display scaling.
 """
 import os
 import sys
