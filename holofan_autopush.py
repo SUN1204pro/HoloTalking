@@ -169,7 +169,7 @@ START_TRANSCODE_XY= _xy("HOLO_START_XY",          "0.475,0.925")  # green "Start
 NAME_OK_XY        = _xy("HOLO_NAMEOK_XY",         "0.400,0.585")  # green "OK" on File Name dialog
 NEWFILE_XY        = _xy("HOLO_NEWFILE_XY",        "0.660,0.905")  # last row after scrolling the list down
 LIST_XY           = _xy("HOLO_LIST_XY",           "0.660,0.500")  # anywhere inside the file-list column
-TRANSCODE_WAIT    = float(os.environ.get("HOLO_TRANSCODE_WAIT", "12"))  # seconds to let transcoding finish
+TRANSCODE_WAIT    = float(os.environ.get("HOLO_TRANSCODE_WAIT", "120"))  # seconds to let transcoding finish
 
 
 def _abs(rx, ry):
