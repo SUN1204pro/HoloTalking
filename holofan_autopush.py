@@ -186,6 +186,11 @@ TRANSCODE_WAIT    = float(os.environ.get("HOLO_TRANSCODE_WAIT", "120"))  # secon
 
 
 def _abs(rx, ry):
+    # On Windows the instruction is "maximise Holoscope", so use the full screen
+    # -- pygetwindow's bounds aren't reliably DPI-consistent with pyautogui here.
+    if sys.platform.startswith("win") or os.environ.get("HOLO_FULLSCREEN_COORDS"):
+        sw, sh = pyautogui.size()
+        return int(sw * rx), int(sh * ry)
     b = _holoscope_bounds()
     if b:
         x, y, w, h = b
@@ -206,9 +211,10 @@ def _upload_windows(video_path):
     """
     print("[autopush] Windows Holoscope: transcode + send ...")
     if not _focus_holoscope():
-        print("[autopush] Holoscope window not found -- open it & connect the fan.")
-        return
-    time.sleep(0.6)
+        print("[autopush] (could not focus Holoscope window -- assuming it's already frontmost)")
+    time.sleep(0.8)
+    x, y = _abs(*TRANSCODE_XY)
+    print(f"[autopush] screen={pyautogui.size()}  first click -> ({x},{y})")
 
     # 1. Transcode -> Windows file dialog
     pyautogui.click(*_abs(*TRANSCODE_XY)); time.sleep(1.8)
