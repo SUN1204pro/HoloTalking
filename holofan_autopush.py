@@ -199,7 +199,8 @@ TRANSCODE_XY      = _xy("HOLO_TRANSCODE_XY",      "0.783,0.923")  # bottom bar "
 SEND_XY           = _xy("HOLO_SEND_XY",           "0.693,0.909")  # bottom bar "Send"
 FREEZE_ROW_XY     = _xy("HOLO_FREEZE_ROW_XY",     "0.200,0.256")  # File List row holding the freeze clip
 TALK_ROW_XY       = _xy("HOLO_TALK_ROW_XY",       "0.200,0.313")  # File List row holding the talking clip
-START_TRANSCODE_XY= _xy("HOLO_START_XY",          "0.470,0.900")  # green "Start Transcode" (bottom-right of the preview circle)
+START_TRANSCODE_XY= _xy("HOLO_START_XY",          "0.640,0.852")  # "Start Transcode" (measured 1800x1500 on 2814x1760)
+NAME_FIELD_XY     = _xy("HOLO_NAMEFIELD_XY",      "0.500,0.455")  # text box on the File Name dialog (measured 1407x800)
 NAME_OK_XY        = _xy("HOLO_NAMEOK_XY",         "0.400,0.585")  # green "OK" on the File Name dialog
 TRANSCODE_WAIT    = float(os.environ.get("HOLO_TRANSCODE_WAIT", "120"))  # seconds to let transcoding finish
 
@@ -216,6 +217,38 @@ def _abs(rx, ry):
         return x + int(w * rx), y + int(h * ry)
     sw, sh = pyautogui.size()
     return int(sw * rx), int(sh * ry)
+
+
+def _transcode_windows(video_path, name=None):
+    """Import ONE mp4 into Holoscope's File List (no Send).
+        Transcode -> file dialog (Ctrl+L + path + Enter) -> click the video
+        -> Start Transcode -> File Name dialog: rename to `name` -> OK -> wait.
+    Used by --setup to seed "1" (freeze) and "2" (motion)."""
+    _minimize_console()
+    _focus_holoscope()
+    time.sleep(0.8)
+    print(f"[setup] transcoding {os.path.basename(video_path)} as '{name or 'auto'}'")
+
+    pyautogui.click(*_abs(*TRANSCODE_XY)); time.sleep(1.8)
+    pyautogui.hotkey("ctrl", "l"); time.sleep(0.4)
+    pyautogui.write(video_path, interval=0.004); time.sleep(0.3)
+    pyautogui.press("enter"); time.sleep(2.2)
+
+    # click the video in the preview so it's selected, then Start Transcode
+    pyautogui.click(*_abs(0.30, 0.45)); time.sleep(0.6)
+    pyautogui.click(*_abs(*START_TRANSCODE_XY)); time.sleep(1.2)
+
+    # File Name dialog: clear + type the name
+    if name:
+        pyautogui.click(*_abs(*NAME_FIELD_XY)); time.sleep(0.4)
+        pyautogui.hotkey("ctrl", "a"); time.sleep(0.1)
+        pyautogui.press("delete"); time.sleep(0.1)
+        pyautogui.write(str(name), interval=0.02); time.sleep(0.3)
+    pyautogui.click(*_abs(*NAME_OK_XY)); time.sleep(1.0)
+
+    print(f"[setup] transcoding (~{TRANSCODE_WAIT}s)...")
+    time.sleep(TRANSCODE_WAIT)
+    print(f"[setup] '{name or 'auto'}' done.")
 
 
 def _upload_windows(video_path):
@@ -382,20 +415,39 @@ def poll_loop(base_url):
 
 
 def setup_freeze(base_url, seconds=None):
-    """One-shot: download the idle/freeze clip and transcode+Send it to the fan."""
+    """One-shot --setup: transcode the two clips SEND_ONLY needs into the File List.
+        freeze clip  -> named "1"   (FREEZE_ROW_XY)
+        latest talking clip -> named "2"   (TALK_ROW_XY), if one exists yet
+    Then run WITHOUT --setup with HOLO_SEND_ONLY=1."""
     if seconds is None:
         try:
             seconds = int(os.environ.get("FREEZE_SECONDS", "5"))
         except ValueError:
             seconds = 5
     base_url = base_url.rstrip("/")
+
     url = f"{base_url}/api/freeze_video/download?seconds={seconds}"
     print(f"[setup] downloading freeze clip ({seconds}s) from {url}")
     _download(url, FREEZE_FILE)
-    print(f"[setup] saved -> {FREEZE_FILE}")
-    time.sleep(2)
-    upload_to_holoscope(FREEZE_FILE)
-    print("[setup] freeze clip transcoded + sent. Now run WITHOUT --setup and Generate.")
+    if sys.platform.startswith("win"):
+        _transcode_windows(FREEZE_FILE, name="1")
+    else:
+        upload_to_holoscope(FREEZE_FILE)
+
+    try:
+        info = _http_json(f"{base_url}/api/latest_video")
+        if info.get("available"):
+            print("[setup] downloading current talking clip as '2'")
+            _download(f"{base_url}/api/latest_video/download", OUT_FILE)
+            if sys.platform.startswith("win"):
+                _transcode_windows(OUT_FILE, name="2")
+        else:
+            print("[setup] no talking clip yet -- Generate once, then re-run --setup "
+                  "(or transcode a reply as '2' by hand).")
+    except Exception as e:
+        print(f"[setup] skip talking clip: {e}")
+
+    print("[setup] done. Now: HOLO_SEND_ONLY=1  python holofan_autopush.py <url>")
 
 
 if __name__ == "__main__":
