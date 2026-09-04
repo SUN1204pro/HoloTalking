@@ -189,7 +189,10 @@ function App() {
       const res = await fetch(`${API_BASE}/api/avatar_clips/generate`, { method: "POST" });
       if (!res.ok) throw new Error(`avatar clip generation failed (${res.status})`);
       const data = await res.json();
+      // Two back-to-back <a download> clicks in the same tick can race each
+      // other (one request gets aborted before it completes) -- space them out.
       triggerBrowserDownload(`${API_BASE}${data.freeze_path}`, "freeze.mp4");
+      await new Promise((r) => setTimeout(r, 800));
       triggerBrowserDownload(`${API_BASE}${data.motion_path}`, "motion.mp4");
     } catch (error) {
       console.error("Avatar clips (freeze/motion) generation error:", error);
