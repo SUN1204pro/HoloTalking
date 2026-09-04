@@ -21,6 +21,7 @@ backend/SadTalker/results/
 backend/SadTalker/result/
 backend/SadTalker/temp_files/
 backend/SadTalker/avatar_cache/
+backend/SadTalker/downloaded/
 backend/SadTalker/venv/
 # SadTalker's own preprocessing cache dir, written as "<source_image_path>hcmus"
 # next to whatever image it's given -- including preset avatars if generated

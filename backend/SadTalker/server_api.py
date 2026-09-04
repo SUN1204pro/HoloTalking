@@ -550,7 +550,7 @@ def _warmup_models():
     threading.Thread(target=_run, daemon=True).start()
 
 
-_GATED_PREFIXES = ("/generate", "/agent/chat", "/preprocess_avatar", "/api/custom_voice")
+_GATED_PREFIXES = ("/generate", "/agent/chat", "/preprocess_avatar", "/api/custom_voice", "/api/avatar_clips")
 
 
 @app.middleware("http")
@@ -1078,6 +1078,105 @@ async def render_talking_clip(
         process_wav2lip(final_video_path, audio_path, final_video_path)
 
     return final_video_path
+
+
+DOWNLOAD_DIR = "downloaded"
+os.makedirs(DOWNLOAD_DIR, exist_ok=True)
+
+_latest_freeze_clip_path = None
+_latest_motion_clip_path = None
+
+AVATAR_IDLE_SECONDS = float(os.environ.get("AVATAR_IDLE_SECONDS", "6"))
+AVATAR_IDLE_EXPRESSION_SCALE = float(os.environ.get("AVATAR_IDLE_EXPRESSION_SCALE", "0.6"))
+AVATAR_IDLE_POSE_STYLE = int(os.environ.get("AVATAR_IDLE_POSE_STYLE", "0"))
+AVATAR_GREETING_TEXT = os.environ.get(
+    "AVATAR_GREETING_TEXT", "Xin chào, tôi có thể giúp gì cho bạn hôm nay?",
+)
+
+
+def _make_silence_wav(path: str, seconds: float):
+    """Silent WAV of `seconds` -- used as the driven audio for the idle clip so
+    SadTalker still runs its natural head-motion/breathing pass, just without
+    any speech to lip-sync to."""
+    cmd = (
+        f'ffmpeg -y -hide_banner -loglevel error -f lavfi '
+        f'-i anullsrc=r=16000:cl=mono -t {seconds} "{path}"'
+    )
+    subprocess.run(cmd, shell=True, check=True)
+
+
+@app.post("/api/avatar_clips/generate")
+async def generate_avatar_clips(
+    seconds: float = None,
+    greeting: str = None,
+    voice_name: str = None,
+    tts_engine: str = "vietneu",
+):
+    """Renders TWO clips from the current avatar, both with real SadTalker head
+    motion (not a dead-static freeze): a silent idle loop and a spoken greeting.
+    Saved under downloaded/ for the frontend to push to the user's Downloads --
+    these are exactly the freeze (slot 1) / motion (slot 2) clips the holofan
+    setup pipeline needs."""
+    global _latest_freeze_clip_path, _latest_motion_clip_path
+
+    img = _last_avatar_image_path
+    if not img or not os.path.exists(img):
+        cands = sorted(glob.glob("avatar_cache/*.png"), key=os.path.getmtime, reverse=True)
+        img = cands[0] if cands else None
+    if not img or not os.path.exists(img):
+        raise HTTPException(status_code=404, detail="No avatar processed yet -- pick an avatar first.")
+
+    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+    run_dir = os.path.join("temp_files", f"avatar_clips_{ts}")
+    os.makedirs(run_dir, exist_ok=True)
+    os.makedirs(DOWNLOAD_DIR, exist_ok=True)
+
+    # 1. idle/freeze clip: silent audio so SadTalker still produces subtle
+    #    natural head sway/breathing instead of a lifeless still frame.
+    silence_path = os.path.join(run_dir, "silence.wav")
+    _make_silence_wav(silence_path, seconds or AVATAR_IDLE_SECONDS)
+    freeze_result = await render_talking_clip(
+        img, silence_path, run_dir, "freeze_idle.mp4",
+        still=False, expression_scale=AVATAR_IDLE_EXPRESSION_SCALE,
+        pose_style=AVATAR_IDLE_POSE_STYLE, lipsync_engine="sadtalker",
+    )
+    freeze_out = os.path.join(DOWNLOAD_DIR, "freeze.mp4")
+    shutil.copy(freeze_result, freeze_out)
+    _latest_freeze_clip_path = freeze_out
+
+    # 2. motion/talking clip: a short spoken greeting, full head motion + lipsync.
+    greeting_audio = os.path.join(run_dir, "greeting.wav")
+    synthesize_tts(
+        greeting or AVATAR_GREETING_TEXT, greeting_audio,
+        tts_engine=tts_engine, voice_name=voice_name,
+    )
+    motion_result = await render_talking_clip(
+        img, greeting_audio, run_dir, "motion_talk.mp4",
+        still=False, lipsync_engine="wav2lip",
+    )
+    motion_out = os.path.join(DOWNLOAD_DIR, "motion.mp4")
+    shutil.copy(motion_result, motion_out)
+    _latest_motion_clip_path = motion_out
+
+    return {
+        "status": "success",
+        "freeze_path": "/api/avatar_clips/freeze/download",
+        "motion_path": "/api/avatar_clips/motion/download",
+    }
+
+
+@app.get("/api/avatar_clips/freeze/download")
+def download_freeze_clip():
+    if not _latest_freeze_clip_path or not os.path.exists(_latest_freeze_clip_path):
+        raise HTTPException(status_code=404, detail="No freeze clip generated yet -- call /api/avatar_clips/generate first.")
+    return FileResponse(_latest_freeze_clip_path, media_type="video/mp4", filename="freeze.mp4")
+
+
+@app.get("/api/avatar_clips/motion/download")
+def download_motion_clip():
+    if not _latest_motion_clip_path or not os.path.exists(_latest_motion_clip_path):
+        raise HTTPException(status_code=404, detail="No motion clip generated yet -- call /api/avatar_clips/generate first.")
+    return FileResponse(_latest_motion_clip_path, media_type="video/mp4", filename="motion.mp4")
 
 
 @app.post("/generate")

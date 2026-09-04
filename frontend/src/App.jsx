@@ -164,10 +164,35 @@ function App() {
       setBgRemovedImageUrl(cleanImageUrl);
       setSelectedImage(cleanImageUrl);
       setIdleVideoUrl(null);
+
+      // Fire-and-forget: render a freeze (idle, subtle head motion) clip and a
+      // motion (talking) clip from this avatar, then save both to Downloads.
+      generateAndDownloadAvatarClips();
     } catch (error) {
       console.error("Avatar Preprocess Error:", error);
     } finally {
       setIsIdleGenerating(false);
+    }
+  };
+
+  const triggerBrowserDownload = (url, filename) => {
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+  };
+
+  const generateAndDownloadAvatarClips = async () => {
+    try {
+      const res = await fetch(`${API_BASE}/api/avatar_clips/generate`, { method: "POST" });
+      if (!res.ok) throw new Error(`avatar clip generation failed (${res.status})`);
+      const data = await res.json();
+      triggerBrowserDownload(`${API_BASE}${data.freeze_path}`, "freeze.mp4");
+      triggerBrowserDownload(`${API_BASE}${data.motion_path}`, "motion.mp4");
+    } catch (error) {
+      console.error("Avatar clips (freeze/motion) generation error:", error);
     }
   };
 
