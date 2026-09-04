@@ -121,6 +121,8 @@ def _minimize_console():
     """Get the terminal out of the way so clicks land on Holoscope, not on it."""
     if not sys.platform.startswith("win"):
         return
+    if os.environ.get("HOLO_KEEP_CONSOLE", "").strip() in ("1", "true", "yes"):
+        return
     try:
         import ctypes
         hwnd = ctypes.windll.kernel32.GetConsoleWindow()
