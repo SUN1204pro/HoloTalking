@@ -158,74 +158,76 @@ def _click_or(name, rx, ry, wait, conf=0.7):
     time.sleep(wait)
 
 
-# Playlist slots (middle column of the Windows Holoscope window). Row n's
-# clickable area, as a fraction of the window. Tune SLOT_X / SLOT_Y0 / SLOT_DY
-# with env vars if the click lands wrong.
-SLOT_X   = float(os.environ.get("HOLO_SLOT_X",  "0.78"))
-SLOT_Y0  = float(os.environ.get("HOLO_SLOT_Y0", "0.135"))   # centre of row 1
-SLOT_DY  = float(os.environ.get("HOLO_SLOT_DY", "0.076"))   # row-to-row spacing
+# Windows Holoscope (PD42 build) click targets, as fractions of the MAXIMISED
+# window. Override any of these with env vars if a click lands wrong, e.g.
+#   $env:HOLO_TRANSCODE_XY="0.68,0.96"
+def _xy(env, default):
+    try:
+        a, b = os.environ.get(env, default).split(",")
+        return float(a), float(b)
+    except Exception:
+        return tuple(float(v) for v in default.split(","))
+
+TRANSCODE_XY      = _xy("HOLO_TRANSCODE_XY",      "0.685,0.965")  # bottom bar "Transcode"
+SEND_XY           = _xy("HOLO_SEND_XY",           "0.565,0.965")  # bottom bar "Send"
+START_TRANSCODE_XY= _xy("HOLO_START_XY",          "0.475,0.925")  # green "Start Transcode"
+NAME_OK_XY        = _xy("HOLO_NAMEOK_XY",         "0.400,0.585")  # green "OK" on File Name dialog
+NEWFILE_XY        = _xy("HOLO_NEWFILE_XY",        "0.660,0.905")  # last row after scrolling the list down
+LIST_XY           = _xy("HOLO_LIST_XY",           "0.660,0.500")  # anywhere inside the file-list column
+TRANSCODE_WAIT    = float(os.environ.get("HOLO_TRANSCODE_WAIT", "12"))  # seconds to let transcoding finish
 
 
-def _slot_point(n):
-    return SLOT_X, SLOT_Y0 + (n - 1) * SLOT_DY
+def _abs(rx, ry):
+    b = _holoscope_bounds()
+    if b:
+        x, y, w, h = b
+        return x + int(w * rx), y + int(h * ry)
+    sw, sh = pyautogui.size()
+    return int(sw * rx), int(sh * ry)
 
 
-def _select_slot(n):
-    """Click playlist row n so the next Transfer fills it / it becomes the one
-    that plays."""
-    rx, ry = _slot_point(n)
-    _click_or(f"slot_{n}.png", rx, ry, 0.8)
+def _upload_windows(video_path):
+    """Windows Holoscope PD42 build (confirmed from screenshots):
+        Transcode -> file dialog (Ctrl+L, type full path, Enter)
+        -> preview -> Start Transcode -> "File Name" dialog -> OK
+        -> wait for transcoding -> scroll file list to bottom -> click new row
+        -> Send  (sends the selected file to the fan)
 
-
-def play_slot(n):
-    """Switch what the fan shows to playlist slot n (one click, no file transfer)."""
-    if not _GUI:
-        return
-    with _upload_lock:
-        _focus_holoscope()
-        time.sleep(0.3)
-        rx, ry = _slot_point(n)
-        _click_or(f"slot_{n}.png", rx, ry, 0.5)
-        # click the row's play control (a bit right of the row label)
-        _click_or(f"slot_{n}_play.png", min(0.86, rx + 0.06), ry, 0.4)
-    print(f"[autopush] -> playing slot {n}")
-
-
-def _upload_windows(video_path, slot=None):
-    """Windows Holoscope 'Truyền tải / Transfer' flow (confirmed from screenshots):
-        [select slot] -> Transfer -> Windows file dialog (type path, Open)
-        -> trim screen -> 'Bắt đầu chuyển' (Start transfer)
-        -> filename dialog -> 'Xác nhận' (Confirm)  -> progress to 100%
-
-    Optional button PNGs next to this script (crop on the real Windows screen):
-        transfer_btn.png  start_transfer_btn.png  confirm_btn.png  slot_1.png ...
+    Tune the coordinates via env vars (see top of file) if clicks miss.
+    Maximise the Holoscope window and keep it maximised.
     """
-    print(f"[autopush] uploading via Windows Holoscope" + (f" (slot {slot})" if slot else "") + " ...")
-    _focus_holoscope()
+    print("[autopush] Windows Holoscope: transcode + send ...")
+    if not _focus_holoscope():
+        print("[autopush] Holoscope window not found -- open it & connect the fan.")
+        return
     time.sleep(0.6)
 
-    if slot:
-        _select_slot(slot)
+    # 1. Transcode -> Windows file dialog
+    pyautogui.click(*_abs(*TRANSCODE_XY)); time.sleep(1.8)
 
-    # 1. open the Transfer file dialog (bottom bar, centre-ish)
-    _click_or("transfer_btn.png", 0.74, 0.95, 1.6)
+    # 2. file dialog: address bar (Ctrl+L) accepts a full FILE path -> opens it
+    pyautogui.hotkey("ctrl", "l"); time.sleep(0.4)
+    pyautogui.write(video_path, interval=0.004); time.sleep(0.3)
+    pyautogui.press("enter"); time.sleep(2.2)
 
-    # 2. Windows file-open dialog: the "File name" box already has focus.
-    #    Select-all (in case of leftover text), type the full path, Enter = Open.
-    time.sleep(0.5)
-    pyautogui.hotkey("ctrl", "a")
-    pyautogui.write(video_path, interval=0.005)
-    time.sleep(0.3)
-    pyautogui.press("enter")
-    time.sleep(2.0)
+    # 3. preview -> Start Transcode
+    pyautogui.click(*_abs(*START_TRANSCODE_XY)); time.sleep(1.2)
 
-    # 3. trim/preview screen -> "Bắt đầu chuyển" (Start transfer), green, bottom-right
-    _click_or("start_transfer_btn.png", 0.88, 0.90, 1.5)
+    # 4. "File Name" dialog -> OK (keep the auto-generated name)
+    pyautogui.click(*_abs(*NAME_OK_XY)); time.sleep(1.0)
 
-    # 4. filename dialog -> "Xác nhận" (Confirm), left button
-    _click_or("confirm_btn.png", 0.47, 0.63, 1.0)
+    # 5. wait for the transcode to finish, then pick the freshly added file
+    print(f"[autopush] transcoding (~{TRANSCODE_WAIT}s)...")
+    time.sleep(TRANSCODE_WAIT)
+    lx, ly = _abs(*LIST_XY)
+    pyautogui.moveTo(lx, ly)
+    pyautogui.scroll(-4000)                 # scroll the file list to the bottom
+    time.sleep(0.6)
+    pyautogui.click(*_abs(*NEWFILE_XY)); time.sleep(0.6)
 
-    print("[autopush] transfer started -- watch the % bar in Holoscope.")
+    # 6. Send to the fan
+    pyautogui.click(*_abs(*SEND_XY)); time.sleep(1.0)
+    print("[autopush] Send clicked -- watch the fan.")
 
 
 def _upload_mac(video_path):
@@ -251,13 +253,13 @@ def _upload_mac(video_path):
     print("[autopush] upload triggered (mac) -- watch Holoscope.")
 
 
-def upload_to_holoscope(video_path, slot=None):
+def upload_to_holoscope(video_path):
     if not _GUI:
         return
     with _upload_lock:
         try:
             if sys.platform.startswith("win"):
-                _upload_windows(video_path, slot=slot)
+                _upload_windows(video_path)
             else:
                 _upload_mac(video_path)
         except Exception as e:
@@ -285,82 +287,45 @@ def _download(url, dest, timeout=120):
             f.write(chunk)
 
 
-# Which playlist slot holds which clip.
-SLOT_FREEZE = int(os.environ.get("HOLO_SLOT_FREEZE", "1"))
-SLOT_TALK   = int(os.environ.get("HOLO_SLOT_TALK",   "2"))
 FREEZE_FILE = os.path.join(HERE, "freeze.mp4")
 
 
 def poll_loop(base_url):
-    """State machine: keep the fan on the FREEZE slot while idle / generating,
-    switch to the TALK slot for the length of each new talking clip, then back.
-
-      new clip rendered   -> upload it into SLOT_TALK, play SLOT_TALK for its duration
-      is_generating / done -> play SLOT_FREEZE
-
-    Only HTTP -- polls /api/latest_video (which also carries is_generating + duration).
-    """
+    """Poll /api/latest_video; on each new talking clip, transcode + Send it to
+    the fan (Holoscope shows the latest). Pure HTTP, no socket."""
     base_url = base_url.rstrip("/")
-    print(f"[autopush] state loop: freeze=slot {SLOT_FREEZE}, talk=slot {SLOT_TALK}, poll {POLL_SECONDS}s")
+    print(f"[autopush] polling {base_url}/api/latest_video every {POLL_SECONDS}s ...")
     last_version = None
-    showing = None          # "freeze" | "talk"
-    talk_until = 0.0
-
-    def show(state, n):
-        nonlocal showing
-        if showing != state:
-            play_slot(n)
-            showing = state
-
     while True:
-        now = time.time()
         try:
             info = _http_json(f"{base_url}/api/latest_video")
             ver = info.get("version")
-            gen = info.get("is_generating")
-
             if info.get("available") and ver != last_version:
-                if last_version is not None:
-                    dur = float(info.get("duration") or 8.0)
-                    print(f"[autopush] new clip v={ver} ({dur}s) -- downloading & sending to slot {SLOT_TALK}")
+                if last_version is not None:          # ignore the clip already there at startup
+                    print(f"[autopush] new clip v={ver} ({info.get('duration')}s) -- downloading")
                     _download(f"{base_url}/api/latest_video/download", OUT_FILE)
-                    upload_to_holoscope(OUT_FILE, slot=SLOT_TALK)      # blocking: does the Transfer dialog
-                    play_slot(SLOT_TALK)
-                    showing = "talk"
-                    talk_until = time.time() + dur + 1.0
+                    upload_to_holoscope(OUT_FILE)
                 last_version = ver
-
-            elif showing == "talk" and now >= talk_until:
-                show("freeze", SLOT_FREEZE)                            # talking clip finished
-            elif gen:
-                show("freeze", SLOT_FREEZE)                            # listening / rendering
-            elif showing is None:
-                show("freeze", SLOT_FREEZE)                            # first run
         except Exception as e:
             print(f"[autopush] poll error: {e}")
         time.sleep(POLL_SECONDS)
 
 
 def setup_freeze(base_url, seconds=None):
+    """One-shot: download the idle/freeze clip and transcode+Send it to the fan."""
     if seconds is None:
         try:
             seconds = int(os.environ.get("FREEZE_SECONDS", "5"))
         except ValueError:
             seconds = 5
-    """One-shot: download the idle/freeze clip and upload it to Holoscope
-    (put it in slot 1 of the fan playlist, then run without --setup for the
-    talking clip in slot 2)."""
     base_url = base_url.rstrip("/")
     url = f"{base_url}/api/freeze_video/download?seconds={seconds}"
     print(f"[setup] downloading freeze clip ({seconds}s) from {url}")
     _download(url, FREEZE_FILE)
     print(f"[setup] saved -> {FREEZE_FILE}")
-    print(f"[setup] uploading freeze clip into slot {SLOT_FREEZE}...")
     time.sleep(2)
-    upload_to_holoscope(FREEZE_FILE, slot=SLOT_FREEZE)
-    print(f"[setup] done. Freeze clip is in slot {SLOT_FREEZE}.")
-    print("[setup] Now run WITHOUT --setup and generate in the browser --")
-    print(f"[setup] talking clips go to slot {SLOT_TALK}, and the fan switches automatically.")
+    upload_to_holoscope(FREEZE_FILE)
+    print("[setup] freeze clip transcoded + sent. Now run WITHOUT --setup and Generate.")
 
 
 if __name__ == "__main__":
