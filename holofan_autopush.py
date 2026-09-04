@@ -39,6 +39,19 @@ import sys
 import time
 import threading
 
+# Windows: become DPI-aware so pyautogui uses real pixels even when the display
+# is scaled (Parallels often forces 200-250%). Without this, clicks land in a
+# corner because logical != physical coordinates.
+if sys.platform.startswith("win"):
+    try:
+        import ctypes
+        ctypes.windll.user32.SetProcessDpiAwarenessContext(ctypes.c_void_p(-4))
+    except Exception:
+        try:
+            ctypes.windll.shcore.SetProcessDpiAwareness(2)
+        except Exception:
+            pass
+
 HERE = os.path.dirname(os.path.abspath(__file__))
 OUT_FILE = os.path.join(HERE, "received_holofan_video.mp4")
 HOLOSCOPE_WINDOW_HINT = "Holoscope"          # window title substring
