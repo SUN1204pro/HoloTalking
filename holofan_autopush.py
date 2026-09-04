@@ -199,6 +199,8 @@ TRANSCODE_XY      = _xy("HOLO_TRANSCODE_XY",      "0.783,0.923")  # bottom bar "
 SEND_XY           = _xy("HOLO_SEND_XY",           "0.693,0.909")  # bottom bar "Send"
 FREEZE_ROW_XY     = _xy("HOLO_FREEZE_ROW_XY",     "0.746,0.142")  # File List row "1" = freeze clip (measured 2100x250)
 TALK_ROW_XY       = _xy("HOLO_TALK_ROW_XY",       "0.746,0.170")  # File List row "2" = motion clip (measured 2100x300)
+FREEZE_LOOP_XY    = _xy("HOLO_FREEZE_LOOP_XY",    "0.773,0.142")  # "loop" toggle on row 1 (measured 2175x250)
+TALK_LOOP_XY      = _xy("HOLO_TALK_LOOP_XY",      "0.773,0.170")  # "loop" toggle on row 2 (measured 2175x300)
 START_TRANSCODE_XY= _xy("HOLO_START_XY",          "0.640,0.852")  # "Start Transcode" (measured 1800x1500 on 2814x1760)
 NAME_FIELD_XY     = _xy("HOLO_NAMEFIELD_XY",      "0.500,0.455")  # text box on the File Name dialog (measured 1407x800)
 NAME_OK_XY        = _xy("HOLO_NAMEOK_XY",         "0.426,0.511")  # "OK" on the File Name dialog (measured 1200x900)
@@ -320,15 +322,15 @@ def show_row(which):
     so the fan switches to that already-transcoded clip. `which` is 'freeze'|'talk'."""
     if not _GUI:
         return
-    row = FREEZE_ROW_XY if which == "freeze" else TALK_ROW_XY
+    row  = FREEZE_ROW_XY  if which == "freeze" else TALK_ROW_XY
+    loop = FREEZE_LOOP_XY if which == "freeze" else TALK_LOOP_XY
     with _upload_lock:
         _minimize_console()
         _focus_holoscope()
         time.sleep(0.6)
-        rx, ry = _abs(*row)
-        pyautogui.doubleClick(rx, ry); time.sleep(0.6)
-        sx, sy = _abs(*SEND_XY)
-        pyautogui.click(sx, sy); time.sleep(0.8)
+        pyautogui.doubleClick(*_abs(*row)); time.sleep(0.6)
+        pyautogui.click(*_abs(*loop)); time.sleep(0.4)   # ensure "loop" is on
+        pyautogui.click(*_abs(*SEND_XY)); time.sleep(0.8)
     print(f"[autopush] -> fan showing {which}")
 
 
