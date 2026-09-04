@@ -269,11 +269,14 @@ except Exception:
 
 
 def _abs(rx, ry):
-    """Resolve a coord pair. Values > 1 are pixels measured on a 2814x1760 screen
-    (scaled to the real screen); values in 0..1 are fractions of the screen."""
+    """Resolve a coord pair. Values > 1 are used as literal screen pixels;
+    values in 0..1 are fractions of the screen. Set HOLO_SCALE_COORDS=1 to scale
+    pixel values from the 2814x1760 base to the real screen instead."""
     sw, sh = pyautogui.size()
     if rx > 1 or ry > 1:
-        return int(rx * sw / _BW), int(ry * sh / _BH)
+        if os.environ.get("HOLO_SCALE_COORDS", "").strip() in ("1", "true", "yes"):
+            return int(rx * sw / _BW), int(ry * sh / _BH)
+        return int(rx), int(ry)
     if not (sys.platform.startswith("win") or os.environ.get("HOLO_FULLSCREEN_COORDS")):
         b = _holoscope_bounds()
         if b:
