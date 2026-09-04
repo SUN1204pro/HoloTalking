@@ -176,12 +176,11 @@ def _xy(env, default):
     except Exception:
         return tuple(float(v) for v in default.split(","))
 
-TRANSCODE_XY      = _xy("HOLO_TRANSCODE_XY",      "0.685,0.965")  # bottom bar "Transcode"
-SEND_XY           = _xy("HOLO_SEND_XY",           "0.565,0.965")  # bottom bar "Send"
-START_TRANSCODE_XY= _xy("HOLO_START_XY",          "0.475,0.925")  # green "Start Transcode"
-NAME_OK_XY        = _xy("HOLO_NAMEOK_XY",         "0.400,0.585")  # green "OK" on File Name dialog
-NEWFILE_XY        = _xy("HOLO_NEWFILE_XY",        "0.660,0.905")  # last row after scrolling the list down
-LIST_XY           = _xy("HOLO_LIST_XY",           "0.660,0.500")  # anywhere inside the file-list column
+# Fractions of the MAXIMISED Holoscope window (measured from a 2814x1760 shot).
+TRANSCODE_XY      = _xy("HOLO_TRANSCODE_XY",      "0.783,0.923")  # bottom bar "Transcode"
+SEND_XY           = _xy("HOLO_SEND_XY",           "0.710,0.923")  # bottom bar "Send"
+START_TRANSCODE_XY= _xy("HOLO_START_XY",          "0.470,0.900")  # green "Start Transcode" (bottom-right of the preview circle)
+NAME_OK_XY        = _xy("HOLO_NAMEOK_XY",         "0.400,0.585")  # green "OK" on the File Name dialog
 TRANSCODE_WAIT    = float(os.environ.get("HOLO_TRANSCODE_WAIT", "120"))  # seconds to let transcoding finish
 
 
@@ -230,16 +229,11 @@ def _upload_windows(video_path):
     # 4. "File Name" dialog -> OK (keep the auto-generated name)
     pyautogui.click(*_abs(*NAME_OK_XY)); time.sleep(1.0)
 
-    # 5. wait for the transcode to finish, then pick the freshly added file
+    # 5. wait for the transcode to finish (Holoscope auto-selects the new file)
     print(f"[autopush] transcoding (~{TRANSCODE_WAIT}s)...")
     time.sleep(TRANSCODE_WAIT)
-    lx, ly = _abs(*LIST_XY)
-    pyautogui.moveTo(lx, ly)
-    pyautogui.scroll(-4000)                 # scroll the file list to the bottom
-    time.sleep(0.6)
-    pyautogui.click(*_abs(*NEWFILE_XY)); time.sleep(0.6)
 
-    # 6. Send to the fan
+    # 6. Send the (auto-selected, just-transcoded) file to the fan
     pyautogui.click(*_abs(*SEND_XY)); time.sleep(1.0)
     print("[autopush] Send clicked -- watch the fan.")
 
