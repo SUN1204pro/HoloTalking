@@ -341,7 +341,12 @@ def poll_loop(base_url):
         time.sleep(POLL_SECONDS)
 
 
-def setup_freeze(base_url, seconds=30):
+def setup_freeze(base_url, seconds=None):
+    if seconds is None:
+        try:
+            seconds = int(os.environ.get("FREEZE_SECONDS", "5"))
+        except ValueError:
+            seconds = 5
     """One-shot: download the idle/freeze clip and upload it to Holoscope
     (put it in slot 1 of the fan playlist, then run without --setup for the
     talking clip in slot 2)."""
