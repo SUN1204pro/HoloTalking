@@ -211,18 +211,26 @@ NAME_OK_XY        = _xy("HOLO_NAMEOK_XY",         "1200,900")     # "OK" on the 
 TRANSCODE_WAIT    = float(os.environ.get("HOLO_TRANSCODE_WAIT", "120"))  # seconds to let transcoding finish
 
 
+# The SEND_ONLY / --setup pixels were measured on a 2814x1760 screen. If the
+# real screen differs they're scaled proportionally. Override with HOLO_BASE_RES.
+try:
+    _BW, _BH = (float(v) for v in os.environ.get("HOLO_BASE_RES", "2814,1760").split(","))
+except Exception:
+    _BW, _BH = 2814.0, 1760.0
+
+
 def _abs(rx, ry):
-    """Resolve a coord pair. Values > 1 are literal pixels; values in 0..1 are
-    fractions of the full screen (Holoscope is meant to be maximised)."""
+    """Resolve a coord pair. Values > 1 are pixels measured on a 2814x1760 screen
+    (scaled to the real screen); values in 0..1 are fractions of the screen."""
     sw, sh = pyautogui.size()
-    x = int(rx) if rx > 1 else int(sw * rx)
-    y = int(ry) if ry > 1 else int(sh * ry)
-    if rx <= 1 and ry <= 1 and not (sys.platform.startswith("win") or os.environ.get("HOLO_FULLSCREEN_COORDS")):
+    if rx > 1 or ry > 1:
+        return int(rx * sw / _BW), int(ry * sh / _BH)
+    if not (sys.platform.startswith("win") or os.environ.get("HOLO_FULLSCREEN_COORDS")):
         b = _holoscope_bounds()
         if b:
             bx, by, bw, bh = b
             return bx + int(bw * rx), by + int(bh * ry)
-    return x, y
+    return int(sw * rx), int(sh * ry)
 
 
 SETUP_WAIT = float(os.environ.get("HOLO_SETUP_WAIT", "15"))  # seconds to wait per clip in --setup
