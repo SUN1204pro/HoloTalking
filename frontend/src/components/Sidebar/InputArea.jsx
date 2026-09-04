@@ -448,6 +448,41 @@ function InputArea({
     }
   };
 
+  // Push-to-talk: hold SPACE to record, release to stop + send.
+  // Only in the LIVE_MIC tab, and never while typing in a field.
+  const spaceHeldRef = useRef(false);
+  useEffect(() => {
+    if (activeTab !== "LIVE_MIC") return;
+
+    const isTypingTarget = (el) =>
+      el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.isContentEditable);
+
+    const onKeyDown = (e) => {
+      if (e.code !== "Space" || e.repeat) return;
+      if (isTypingTarget(e.target)) return;
+      e.preventDefault();
+      if (spaceHeldRef.current) return;
+      spaceHeldRef.current = true;
+      if (!isRecording) startLiveRecording();
+    };
+
+    const onKeyUp = (e) => {
+      if (e.code !== "Space") return;
+      if (!spaceHeldRef.current) return;
+      spaceHeldRef.current = false;
+      e.preventDefault();
+      stopLiveRecording();          // onstop auto-calls handleGenerate -> sends to backend
+    };
+
+    window.addEventListener("keydown", onKeyDown);
+    window.addEventListener("keyup", onKeyUp);
+    return () => {
+      window.removeEventListener("keydown", onKeyDown);
+      window.removeEventListener("keyup", onKeyUp);
+      spaceHeldRef.current = false;
+    };
+  }, [activeTab, isRecording]);
+
   const formatTimer = (seconds) => {
     const mins = Math.floor(seconds / 60);
     const secs = seconds % 60;
@@ -603,6 +638,9 @@ function InputArea({
                   <span className="material-symbols-outlined text-xl text-secondary">mic</span>
                   Start Live Mic Recording
                 </button>
+                <p className="text-[10px] text-outline/80 italic">
+                  or hold <kbd className="px-1.5 py-0.5 rounded bg-black/50 border border-outline-variant/60 not-italic">Space</kbd> to talk — release to send
+                </p>
               </div>
             )}
           </div>
