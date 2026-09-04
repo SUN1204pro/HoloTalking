@@ -45,3 +45,4 @@ frontend/dist/
 # OS / System Junk
 .DS_Store
 Thumbs.db
+holo_coords.json

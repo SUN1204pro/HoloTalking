@@ -219,6 +219,46 @@ NAME_FIELD_XY     = _xy("HOLO_NAMEFIELD_XY",      "1407,800")     # text box on 
 NAME_OK_XY        = _xy("HOLO_NAMEOK_XY",         "1200,900")     # "OK" on the File Name dialog
 TRANSCODE_WAIT    = float(os.environ.get("HOLO_TRANSCODE_WAIT", "120"))  # seconds to let transcoding finish
 
+# --- calibration: holo_coords.json stores each button as a fraction of the
+# screen (resolution-independent). Written by `--calibrate`, loaded here.
+import json
+_COORDS_FILE = os.path.join(HERE, "holo_coords.json")
+_COORD_KEYS = {
+    "SEND_XY":            "Send button",
+    "DISPLAY_XY":         "Display button",
+    "FREEZE_ROW_XY":      "Freeze clip row (list 1)",
+    "TALK_ROW_XY":        "Motion clip row (list 2)",
+    "FREEZE_LOOP_XY":     "Loop toggle on the freeze row",
+    "TALK_LOOP_XY":       "Loop toggle on the motion row",
+    "START_TRANSCODE_XY": "Start Transcode button",
+    "NAME_FIELD_XY":      "File Name text box",
+    "NAME_OK_XY":         "OK on the File Name dialog",
+}
+if os.path.exists(_COORDS_FILE):
+    try:
+        _saved = json.load(open(_COORDS_FILE))
+        for _k, _v in _saved.items():
+            if _k in _COORD_KEYS and isinstance(_v, (list, tuple)) and len(_v) == 2:
+                globals()[_k] = (float(_v[0]), float(_v[1]))
+        print(f"[autopush] loaded calibrated coords from {_COORDS_FILE}")
+    except Exception as _e:
+        print(f"[autopush] ignoring bad {_COORDS_FILE}: {_e}")
+
+
+def calibrate():
+    if not _GUI:
+        print("pyautogui not available"); return
+    print("\nMAXIMISE Holoscope. For each item: move the mouse over it, then press Enter here.\n")
+    sw, sh = pyautogui.size()
+    out = {}
+    for k, label in _COORD_KEYS.items():
+        input(f"  hover  {label}  -> Enter ")
+        x, y = pyautogui.position()
+        out[k] = [round(x / sw, 5), round(y / sh, 5)]
+        print(f"      {label}: pixel ({x},{y})  frac {out[k]}")
+    json.dump(out, open(_COORDS_FILE, "w"), indent=2)
+    print(f"\nsaved -> {_COORDS_FILE}\nNow run without --calibrate.")
+
 
 # The SEND_ONLY / --setup pixels were measured on a 2814x1760 screen. If the
 # real screen differs they're scaled proportionally. Override with HOLO_BASE_RES.
@@ -498,6 +538,9 @@ def setup_freeze(base_url, seconds=None):
 
 
 if __name__ == "__main__":
+    if "--calibrate" in sys.argv:
+        calibrate()
+        sys.exit(0)
     args = [a for a in sys.argv[1:] if a != "--setup"]
     is_setup = "--setup" in sys.argv
     arg = args[0] if args else "http://127.0.0.1:8000"
