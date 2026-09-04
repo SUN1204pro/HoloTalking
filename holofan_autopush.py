@@ -197,6 +197,7 @@ def _xy(env, default):
 SEND_ONLY         = os.environ.get("HOLO_SEND_ONLY", "").strip() in ("1", "true", "yes")
 TRANSCODE_XY      = _xy("HOLO_TRANSCODE_XY",      "0.783,0.923")  # bottom bar "Transcode"
 SEND_XY           = _xy("HOLO_SEND_XY",           "0.693,0.909")  # bottom bar "Send"
+DISPLAY_XY        = _xy("HOLO_DISPLAY_XY",        "0.853,0.909")  # "Display" button (measured 2400x1600)
 FREEZE_ROW_XY     = _xy("HOLO_FREEZE_ROW_XY",     "0.746,0.142")  # File List row "1" = freeze clip (measured 2100x250)
 TALK_ROW_XY       = _xy("HOLO_TALK_ROW_XY",       "0.746,0.170")  # File List row "2" = motion clip (measured 2100x300)
 FREEZE_LOOP_XY    = _xy("HOLO_FREEZE_LOOP_XY",    "0.773,0.142")  # "loop" toggle on row 1 (measured 2175x250)
@@ -331,6 +332,7 @@ def show_row(which):
         pyautogui.doubleClick(*_abs(*row)); time.sleep(0.6)
         pyautogui.click(*_abs(*loop)); time.sleep(0.4)   # ensure "loop" is on
         pyautogui.click(*_abs(*SEND_XY)); time.sleep(0.8)
+        pyautogui.click(*_abs(*DISPLAY_XY)); time.sleep(0.6)   # push it to the fan display
     print(f"[autopush] -> fan showing {which}")
 
 
