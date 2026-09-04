@@ -1087,11 +1087,15 @@ _latest_freeze_clip_path = None
 _latest_motion_clip_path = None
 
 AVATAR_IDLE_SECONDS = float(os.environ.get("AVATAR_IDLE_SECONDS", "6"))
-AVATAR_IDLE_EXPRESSION_SCALE = float(os.environ.get("AVATAR_IDLE_EXPRESSION_SCALE", "0.6"))
+# Subtle by default -- a portrait-style avatar (e.g. a painted historical
+# portrait) reads as fake with a big sway; 0.3 gives a light breathing/idle
+# motion instead of the default full-expression 1.0.
+AVATAR_IDLE_EXPRESSION_SCALE = float(os.environ.get("AVATAR_IDLE_EXPRESSION_SCALE", "0.3"))
 AVATAR_IDLE_POSE_STYLE = int(os.environ.get("AVATAR_IDLE_POSE_STYLE", "0"))
 AVATAR_GREETING_TEXT = os.environ.get(
     "AVATAR_GREETING_TEXT", "Xin chào, tôi có thể giúp gì cho bạn hôm nay?",
 )
+AVATAR_CLIP_ENHANCER = os.environ.get("AVATAR_CLIP_ENHANCER", "gfpgan")  # face-restore polish
 
 
 def _make_silence_wav(path: str, seconds: float):
@@ -1111,6 +1115,8 @@ async def generate_avatar_clips(
     greeting: str = None,
     voice_name: str = None,
     tts_engine: str = "vietneu",
+    expression_scale: float = None,
+    enhancer: str = None,
 ):
     """Renders TWO clips from the current avatar, both with real SadTalker head
     motion (not a dead-static freeze): a silent idle loop and a spoken greeting.
@@ -1137,8 +1143,9 @@ async def generate_avatar_clips(
     _make_silence_wav(silence_path, seconds or AVATAR_IDLE_SECONDS)
     freeze_result = await render_talking_clip(
         img, silence_path, run_dir, "freeze_idle.mp4",
-        still=False, expression_scale=AVATAR_IDLE_EXPRESSION_SCALE,
+        still=False, expression_scale=expression_scale or AVATAR_IDLE_EXPRESSION_SCALE,
         pose_style=AVATAR_IDLE_POSE_STYLE, lipsync_engine="sadtalker",
+        enhancer=enhancer or AVATAR_CLIP_ENHANCER,
     )
     freeze_out = os.path.join(DOWNLOAD_DIR, "freeze.mp4")
     shutil.copy(freeze_result, freeze_out)
@@ -1153,6 +1160,7 @@ async def generate_avatar_clips(
     motion_result = await render_talking_clip(
         img, greeting_audio, run_dir, "motion_talk.mp4",
         still=False, lipsync_engine="wav2lip",
+        enhancer=enhancer or AVATAR_CLIP_ENHANCER,
     )
     motion_out = os.path.join(DOWNLOAD_DIR, "motion.mp4")
     shutil.copy(motion_result, motion_out)
