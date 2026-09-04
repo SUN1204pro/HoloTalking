@@ -453,10 +453,14 @@ os.makedirs("examples/source_image", exist_ok=True)
 os.makedirs("result", exist_ok=True)
 os.makedirs("../../result", exist_ok=True)
 
+DOWNLOAD_DIR = "downloaded"
+os.makedirs(DOWNLOAD_DIR, exist_ok=True)
+
 app.mount("/static", StaticFiles(directory="temp_files"), name="static")
 app.mount("/examples", StaticFiles(directory="examples"), name="examples")
 app.mount("/result", StaticFiles(directory="result"), name="result")
 app.mount("/custom_voices", StaticFiles(directory=CUSTOM_VOICE_CACHE_DIR), name="custom_voices")
+app.mount("/downloaded", StaticFiles(directory=DOWNLOAD_DIR), name="downloaded")
 
 app.add_middleware(
     CORSMiddleware,
@@ -550,7 +554,7 @@ def _warmup_models():
     threading.Thread(target=_run, daemon=True).start()
 
 
-_GATED_PREFIXES = ("/generate", "/agent/chat", "/preprocess_avatar", "/api/custom_voice", "/api/avatar_clips")
+_GATED_PREFIXES = ("/generate", "/agent/chat", "/preprocess_avatar", "/api/custom_voice", "/api/avatar_clips", "/api/tts_reply")
 
 
 @app.middleware("http")
@@ -1080,9 +1084,6 @@ async def render_talking_clip(
     return final_video_path
 
 
-DOWNLOAD_DIR = "downloaded"
-os.makedirs(DOWNLOAD_DIR, exist_ok=True)
-
 _latest_freeze_clip_path = None
 _latest_motion_clip_path = None
 
@@ -1185,6 +1186,47 @@ def download_motion_clip():
     if not _latest_motion_clip_path or not os.path.exists(_latest_motion_clip_path):
         raise HTTPException(status_code=404, detail="No motion clip generated yet -- call /api/avatar_clips/generate first.")
     return FileResponse(_latest_motion_clip_path, media_type="video/mp4", filename="motion.mp4")
+
+
+@app.post("/api/tts_reply")
+async def tts_reply(
+    question: str = Form(...),
+    persona: str = Form(None),
+    voice_name: str = Form("Thái Sơn"),
+    voice_style: str = Form(None),
+    tts_engine: str = Form("voxcpm"),
+    elevenlabs_voice_id: str = Form(None),
+    elevenlabs_api_key: str = Form(None),
+    custom_voice_ref: str = Form(None),
+    speed: float = Form(1.0),
+    session_id: str = Form(None),
+    out_name: str = Form(None),
+    api_key: str = Form(None),
+):
+    """Question -> AI persona reply (text) -> TTS -> audio file only, no avatar/
+    video rendering at all. For pre-recording a character's spoken answers."""
+    reply_text = generate_gemini_response(
+        user_message=question, persona=persona, session_id=session_id, api_key=api_key,
+    )
+    if not reply_text or not reply_text.strip():
+        raise HTTPException(status_code=500, detail="AI produced an empty reply.")
+
+    os.makedirs(DOWNLOAD_DIR, exist_ok=True)
+    ts = datetime.now().strftime("%Y%m%d_%H%M%S%f")
+    filename = out_name or f"reply_{ts}.wav"
+    audio_path = os.path.join(DOWNLOAD_DIR, filename)
+    synthesize_tts(
+        reply_text, audio_path, speed=speed, tts_engine=tts_engine,
+        voice_name=voice_name, elevenlabs_voice_id=elevenlabs_voice_id,
+        elevenlabs_api_key=elevenlabs_api_key, voice_style=voice_style,
+        custom_voice_ref=custom_voice_ref,
+    )
+    return {
+        "status": "success",
+        "question": question,
+        "reply_text": reply_text,
+        "audio_path": f"/downloaded/{os.path.basename(audio_path)}",
+    }
 
 
 @app.post("/generate")
