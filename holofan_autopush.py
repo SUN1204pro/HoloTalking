@@ -195,31 +195,34 @@ def _xy(env, default):
 # Holoscope's File List by hand once. The state loop double-clicks the FREEZE row
 # while idle/generating and the TALK row for each reply's duration, then Sends.
 SEND_ONLY         = os.environ.get("HOLO_SEND_ONLY", "").strip() in ("1", "true", "yes")
+# Any value > 1 is an ABSOLUTE pixel (as measured on screen); 0..1 is a fraction
+# of the screen. The SEND_ONLY / --setup coords below are raw pixels the user
+# measured directly -- override with the matching env var if your screen differs.
 TRANSCODE_XY      = _xy("HOLO_TRANSCODE_XY",      "0.783,0.923")  # bottom bar "Transcode"
-SEND_XY           = _xy("HOLO_SEND_XY",           "0.693,0.909")  # bottom bar "Send"
-DISPLAY_XY        = _xy("HOLO_DISPLAY_XY",        "0.853,0.909")  # "Display" button (measured 2400x1600)
-FREEZE_ROW_XY     = _xy("HOLO_FREEZE_ROW_XY",     "0.746,0.142")  # File List row "1" = freeze clip (measured 2100x250)
-TALK_ROW_XY       = _xy("HOLO_TALK_ROW_XY",       "0.746,0.170")  # File List row "2" = motion clip (measured 2100x300)
-FREEZE_LOOP_XY    = _xy("HOLO_FREEZE_LOOP_XY",    "0.773,0.142")  # "loop" toggle on row 1 (measured 2175x250)
-TALK_LOOP_XY      = _xy("HOLO_TALK_LOOP_XY",      "0.773,0.170")  # "loop" toggle on row 2 (measured 2175x300)
-START_TRANSCODE_XY= _xy("HOLO_START_XY",          "0.640,0.852")  # "Start Transcode" (measured 1800x1500 on 2814x1760)
-NAME_FIELD_XY     = _xy("HOLO_NAMEFIELD_XY",      "0.500,0.455")  # text box on the File Name dialog (measured 1407x800)
-NAME_OK_XY        = _xy("HOLO_NAMEOK_XY",         "0.426,0.511")  # "OK" on the File Name dialog (measured 1200x900)
+SEND_XY           = _xy("HOLO_SEND_XY",           "1950,1600")    # bottom bar "Send"
+DISPLAY_XY        = _xy("HOLO_DISPLAY_XY",        "2400,1600")    # "Display" button
+FREEZE_ROW_XY     = _xy("HOLO_FREEZE_ROW_XY",     "2100,250")     # File List row "1" = freeze clip
+TALK_ROW_XY       = _xy("HOLO_TALK_ROW_XY",       "2100,300")     # File List row "2" = motion clip
+FREEZE_LOOP_XY    = _xy("HOLO_FREEZE_LOOP_XY",    "2175,250")     # "loop" toggle on row 1
+TALK_LOOP_XY      = _xy("HOLO_TALK_LOOP_XY",      "2175,300")     # "loop" toggle on row 2
+START_TRANSCODE_XY= _xy("HOLO_START_XY",          "1800,1500")    # "Start Transcode"
+NAME_FIELD_XY     = _xy("HOLO_NAMEFIELD_XY",      "1407,800")     # text box on the File Name dialog
+NAME_OK_XY        = _xy("HOLO_NAMEOK_XY",         "1200,900")     # "OK" on the File Name dialog
 TRANSCODE_WAIT    = float(os.environ.get("HOLO_TRANSCODE_WAIT", "120"))  # seconds to let transcoding finish
 
 
 def _abs(rx, ry):
-    # On Windows the instruction is "maximise Holoscope", so use the full screen
-    # -- pygetwindow's bounds aren't reliably DPI-consistent with pyautogui here.
-    if sys.platform.startswith("win") or os.environ.get("HOLO_FULLSCREEN_COORDS"):
-        sw, sh = pyautogui.size()
-        return int(sw * rx), int(sh * ry)
-    b = _holoscope_bounds()
-    if b:
-        x, y, w, h = b
-        return x + int(w * rx), y + int(h * ry)
+    """Resolve a coord pair. Values > 1 are literal pixels; values in 0..1 are
+    fractions of the full screen (Holoscope is meant to be maximised)."""
     sw, sh = pyautogui.size()
-    return int(sw * rx), int(sh * ry)
+    x = int(rx) if rx > 1 else int(sw * rx)
+    y = int(ry) if ry > 1 else int(sh * ry)
+    if rx <= 1 and ry <= 1 and not (sys.platform.startswith("win") or os.environ.get("HOLO_FULLSCREEN_COORDS")):
+        b = _holoscope_bounds()
+        if b:
+            bx, by, bw, bh = b
+            return bx + int(bw * rx), by + int(bh * ry)
+    return x, y
 
 
 SETUP_WAIT = float(os.environ.get("HOLO_SETUP_WAIT", "15"))  # seconds to wait per clip in --setup
