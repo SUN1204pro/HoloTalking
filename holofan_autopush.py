@@ -234,6 +234,14 @@ def _abs(rx, ry):
 
 
 SETUP_WAIT = float(os.environ.get("HOLO_SETUP_WAIT", "15"))  # seconds to wait per clip in --setup
+CLICK_PAUSE = float(os.environ.get("HOLO_CLICK_PAUSE", "1.0"))  # settle time after every click
+
+
+def _click(*xy, dbl=False):
+    """Move+click a resolved-or-raw coord pair, then wait CLICK_PAUSE seconds."""
+    pt = _abs(*xy) if len(xy) == 2 else xy
+    (pyautogui.doubleClick if dbl else pyautogui.click)(*pt)
+    time.sleep(CLICK_PAUSE)
 
 
 def _transcode_windows(video_path, name):
@@ -246,19 +254,19 @@ def _transcode_windows(video_path, name):
     time.sleep(0.8)
     print(f"[setup] importing {os.path.basename(video_path)} as '{name}'")
 
-    pyautogui.click(*_abs(*SEND_XY)); time.sleep(1.8)          # opens the file dialog
-    pyautogui.hotkey("ctrl", "l"); time.sleep(0.4)
+    _click(*SEND_XY)                                           # opens the file dialog
+    pyautogui.hotkey("ctrl", "l"); time.sleep(CLICK_PAUSE)
     pyautogui.write(video_path, interval=0.004); time.sleep(0.3)
     pyautogui.press("enter"); time.sleep(0.5)
     pyautogui.press("enter"); time.sleep(2.2)                  # "double click" the file open
 
-    pyautogui.click(*_abs(*START_TRANSCODE_XY)); time.sleep(1.2)   # Start Transcode
+    _click(*START_TRANSCODE_XY)                                # Start Transcode
 
-    pyautogui.click(*_abs(*NAME_FIELD_XY)); time.sleep(0.4)
-    pyautogui.hotkey("ctrl", "a"); time.sleep(0.1)
-    pyautogui.press("delete"); time.sleep(0.1)
+    _click(*NAME_FIELD_XY)
+    pyautogui.hotkey("ctrl", "a"); time.sleep(0.2)
+    pyautogui.press("delete"); time.sleep(0.2)
     pyautogui.write(str(name), interval=0.02); time.sleep(0.3)
-    pyautogui.click(*_abs(*NAME_OK_XY)); time.sleep(1.0)           # OK
+    _click(*NAME_OK_XY)                                        # OK
 
     print(f"[setup] waiting {SETUP_WAIT}s for '{name}' ...")
     time.sleep(SETUP_WAIT)
@@ -284,25 +292,25 @@ def _upload_windows(video_path):
     print(f"[autopush] screen={pyautogui.size()}  first click -> ({x},{y})")
 
     # 1. Transcode -> Windows file dialog
-    pyautogui.click(*_abs(*TRANSCODE_XY)); time.sleep(1.8)
+    _click(*TRANSCODE_XY)
 
     # 2. file dialog: address bar (Ctrl+L) accepts a full FILE path -> opens it
-    pyautogui.hotkey("ctrl", "l"); time.sleep(0.4)
+    pyautogui.hotkey("ctrl", "l"); time.sleep(CLICK_PAUSE)
     pyautogui.write(video_path, interval=0.004); time.sleep(0.3)
     pyautogui.press("enter"); time.sleep(2.2)
 
     # 3. preview -> Start Transcode
-    pyautogui.click(*_abs(*START_TRANSCODE_XY)); time.sleep(1.2)
+    _click(*START_TRANSCODE_XY)
 
     # 4. "File Name" dialog -> OK (keep the auto-generated name)
-    pyautogui.click(*_abs(*NAME_OK_XY)); time.sleep(1.0)
+    _click(*NAME_OK_XY)
 
     # 5. wait for the transcode to finish (Holoscope auto-selects the new file)
     print(f"[autopush] transcoding (~{TRANSCODE_WAIT}s)...")
     time.sleep(TRANSCODE_WAIT)
 
     # 6. Send the (auto-selected, just-transcoded) file to the fan
-    pyautogui.click(*_abs(*SEND_XY)); time.sleep(1.0)
+    _click(*SEND_XY)
     print("[autopush] Send clicked -- watch the fan.")
 
 
@@ -339,11 +347,11 @@ def show_row(which):
     with _upload_lock:
         _minimize_console()
         _focus_holoscope()
-        time.sleep(0.6)
-        pyautogui.doubleClick(*_abs(*row)); time.sleep(0.6)
-        pyautogui.click(*_abs(*loop)); time.sleep(0.4)   # ensure "loop" is on
-        pyautogui.click(*_abs(*SEND_XY)); time.sleep(0.8)
-        pyautogui.click(*_abs(*DISPLAY_XY)); time.sleep(0.6)   # push it to the fan display
+        time.sleep(CLICK_PAUSE)
+        _click(*row, dbl=True)
+        _click(*loop)              # ensure "loop" is on
+        _click(*SEND_XY)
+        _click(*DISPLAY_XY)        # push it to the fan display
     print(f"[autopush] -> fan showing {which}")
 
 
@@ -467,8 +475,8 @@ def setup_freeze(base_url, seconds=None):
             _transcode_windows(OUT_FILE, "2")         # motion  -> name 2
         # leave the fan showing the freeze clip (row 1)
         _minimize_console(); _focus_holoscope(); time.sleep(0.6)
-        pyautogui.click(*_abs(*FREEZE_ROW_XY)); time.sleep(0.5)
-        pyautogui.click(*_abs(*DISPLAY_XY)); time.sleep(0.6)
+        _click(*FREEZE_ROW_XY)
+        _click(*DISPLAY_XY)
 
     print("[setup] done. Now: HOLO_SEND_ONLY=1  python holofan_autopush.py <url>")
 
