@@ -191,8 +191,12 @@ def _xy(env, default):
         return tuple(float(v) for v in default.split(","))
 
 # Fractions of the MAXIMISED Holoscope window (measured from a 2814x1760 shot).
+# SEND_ONLY: skip Transcode entirely. Assumes freeze + the talking clip were
+# transcoded into Holoscope's File List by hand once; the script just clicks Send
+# on each new reply so the fan re-sends the currently selected file.
+SEND_ONLY         = os.environ.get("HOLO_SEND_ONLY", "").strip() in ("1", "true", "yes")
 TRANSCODE_XY      = _xy("HOLO_TRANSCODE_XY",      "0.783,0.923")  # bottom bar "Transcode"
-SEND_XY           = _xy("HOLO_SEND_XY",           "0.710,0.923")  # bottom bar "Send"
+SEND_XY           = _xy("HOLO_SEND_XY",           "0.693,0.909")  # bottom bar "Send"
 START_TRANSCODE_XY= _xy("HOLO_START_XY",          "0.470,0.900")  # green "Start Transcode" (bottom-right of the preview circle)
 NAME_OK_XY        = _xy("HOLO_NAMEOK_XY",         "0.400,0.585")  # green "OK" on the File Name dialog
 TRANSCODE_WAIT    = float(os.environ.get("HOLO_TRANSCODE_WAIT", "120"))  # seconds to let transcoding finish
@@ -222,10 +226,18 @@ def _upload_windows(video_path):
     Tune the coordinates via env vars (see top of file) if clicks miss.
     Maximise the Holoscope window and keep it maximised.
     """
-    print("[autopush] Windows Holoscope: transcode + send ...")
     _minimize_console()                 # move the terminal out of the way
     _focus_holoscope()
     time.sleep(0.8)
+
+    if SEND_ONLY:
+        sx, sy = _abs(*SEND_XY)
+        print(f"[autopush] send-only: click Send -> ({sx},{sy})  screen={pyautogui.size()}")
+        pyautogui.click(sx, sy); time.sleep(1.0)
+        print("[autopush] Send clicked -- watch the fan.")
+        return
+
+    print("[autopush] Windows Holoscope: transcode + send ...")
     x, y = _abs(*TRANSCODE_XY)
     print(f"[autopush] screen={pyautogui.size()}  first click -> ({x},{y})")
 
