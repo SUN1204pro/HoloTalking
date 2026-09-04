@@ -149,13 +149,20 @@ def _focus_holoscope():
         wins = pyautogui.getWindowsWithTitle(HOLOSCOPE_WINDOW_HINT)
         if wins:
             w = wins[0]
-            if getattr(w, "isMinimized", False):
-                w.restore()
-            w.activate()
+            try:
+                if getattr(w, "isMinimized", False):
+                    w.restore()
+            except Exception as e:
+                print(f"[autopush] restore failed: {e}", flush=True)
+            try:
+                w.activate()
+            except Exception as e:
+                print(f"[autopush] activate failed (continuing): {e}", flush=True)
             time.sleep(1.0)
             return True
+        print(f"[autopush] no window titled '{HOLOSCOPE_WINDOW_HINT}' -- is Holoscope open?", flush=True)
     except Exception as e:
-        print(f"[autopush] focus failed: {e}")
+        print(f"[autopush] focus failed: {e}", flush=True)
     return False
 
 
@@ -237,9 +244,16 @@ SETUP_WAIT = float(os.environ.get("HOLO_SETUP_WAIT", "15"))  # seconds to wait p
 CLICK_PAUSE = float(os.environ.get("HOLO_CLICK_PAUSE", "1.0"))  # settle time after every click
 
 
+DRYRUN = os.environ.get("HOLO_DRYRUN", "").strip() in ("1", "true", "yes")
+
+
 def _click(*xy, dbl=False):
     """Move+click a resolved-or-raw coord pair, then wait CLICK_PAUSE seconds."""
     pt = _abs(*xy) if len(xy) == 2 else xy
+    print(f"[click] {'double' if dbl else 'single'} -> {pt}", flush=True)
+    if DRYRUN:
+        return
+    pyautogui.moveTo(*pt, duration=0.25)
     (pyautogui.doubleClick if dbl else pyautogui.click)(*pt)
     time.sleep(CLICK_PAUSE)
 
