@@ -117,6 +117,20 @@ def _holoscope_bounds():
         return None
 
 
+def _minimize_console():
+    """Get the terminal out of the way so clicks land on Holoscope, not on it."""
+    if not sys.platform.startswith("win"):
+        return
+    try:
+        import ctypes
+        hwnd = ctypes.windll.kernel32.GetConsoleWindow()
+        if hwnd:
+            ctypes.windll.user32.ShowWindow(hwnd, 6)   # SW_MINIMIZE
+            time.sleep(0.4)
+    except Exception:
+        pass
+
+
 def _focus_holoscope():
     if sys.platform == "darwin":
         # macOS: focus via AppleScript (pygetwindow doesn't work here).
@@ -209,8 +223,8 @@ def _upload_windows(video_path):
     Maximise the Holoscope window and keep it maximised.
     """
     print("[autopush] Windows Holoscope: transcode + send ...")
-    if not _focus_holoscope():
-        print("[autopush] (could not focus Holoscope window -- assuming it's already frontmost)")
+    _minimize_console()                 # move the terminal out of the way
+    _focus_holoscope()
     time.sleep(0.8)
     x, y = _abs(*TRANSCODE_XY)
     print(f"[autopush] screen={pyautogui.size()}  first click -> ({x},{y})")
