@@ -1088,10 +1088,9 @@ _latest_freeze_clip_path = None
 _latest_motion_clip_path = None
 
 AVATAR_IDLE_SECONDS = float(os.environ.get("AVATAR_IDLE_SECONDS", "6"))
-# Subtle by default -- a portrait-style avatar (e.g. a painted historical
-# portrait) reads as fake with a big sway; 0.3 gives a light breathing/idle
-# motion instead of the default full-expression 1.0.
-AVATAR_IDLE_EXPRESSION_SCALE = float(os.environ.get("AVATAR_IDLE_EXPRESSION_SCALE", "0.3"))
+# A near-full expression scale reads more realistic than a barely-moving
+# portrait -- 0.9 gives a natural idle sway/breathing motion.
+AVATAR_IDLE_EXPRESSION_SCALE = float(os.environ.get("AVATAR_IDLE_EXPRESSION_SCALE", "0.9"))
 AVATAR_IDLE_POSE_STYLE = int(os.environ.get("AVATAR_IDLE_POSE_STYLE", "0"))
 AVATAR_GREETING_TEXT = os.environ.get(
     "AVATAR_GREETING_TEXT", "Xin chào, tôi có thể giúp gì cho bạn hôm nay?",
