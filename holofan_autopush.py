@@ -191,12 +191,14 @@ def _xy(env, default):
         return tuple(float(v) for v in default.split(","))
 
 # Fractions of the MAXIMISED Holoscope window (measured from a 2814x1760 shot).
-# SEND_ONLY: skip Transcode entirely. Assumes freeze + the talking clip were
-# transcoded into Holoscope's File List by hand once; the script just clicks Send
-# on each new reply so the fan re-sends the currently selected file.
+# SEND_ONLY: skip Transcode. freeze + a talking clip are transcoded into
+# Holoscope's File List by hand once. The state loop double-clicks the FREEZE row
+# while idle/generating and the TALK row for each reply's duration, then Sends.
 SEND_ONLY         = os.environ.get("HOLO_SEND_ONLY", "").strip() in ("1", "true", "yes")
 TRANSCODE_XY      = _xy("HOLO_TRANSCODE_XY",      "0.783,0.923")  # bottom bar "Transcode"
 SEND_XY           = _xy("HOLO_SEND_XY",           "0.693,0.909")  # bottom bar "Send"
+FREEZE_ROW_XY     = _xy("HOLO_FREEZE_ROW_XY",     "0.200,0.256")  # File List row holding the freeze clip
+TALK_ROW_XY       = _xy("HOLO_TALK_ROW_XY",       "0.200,0.313")  # File List row holding the talking clip
 START_TRANSCODE_XY= _xy("HOLO_START_XY",          "0.470,0.900")  # green "Start Transcode" (bottom-right of the preview circle)
 NAME_OK_XY        = _xy("HOLO_NAMEOK_XY",         "0.400,0.585")  # green "OK" on the File Name dialog
 TRANSCODE_WAIT    = float(os.environ.get("HOLO_TRANSCODE_WAIT", "120"))  # seconds to let transcoding finish
@@ -229,13 +231,6 @@ def _upload_windows(video_path):
     _minimize_console()                 # move the terminal out of the way
     _focus_holoscope()
     time.sleep(0.8)
-
-    if SEND_ONLY:
-        sx, sy = _abs(*SEND_XY)
-        print(f"[autopush] send-only: click Send -> ({sx},{sy})  screen={pyautogui.size()}")
-        pyautogui.click(sx, sy); time.sleep(1.0)
-        print("[autopush] Send clicked -- watch the fan.")
-        return
 
     print("[autopush] Windows Holoscope: transcode + send ...")
     x, y = _abs(*TRANSCODE_XY)
@@ -287,6 +282,23 @@ def _upload_mac(video_path):
     print("[autopush] upload triggered (mac) -- watch Holoscope.")
 
 
+def show_row(which):
+    """SEND_ONLY: double-click the FREEZE or TALK row in the File List, then Send,
+    so the fan switches to that already-transcoded clip. `which` is 'freeze'|'talk'."""
+    if not _GUI:
+        return
+    row = FREEZE_ROW_XY if which == "freeze" else TALK_ROW_XY
+    with _upload_lock:
+        _minimize_console()
+        _focus_holoscope()
+        time.sleep(0.6)
+        rx, ry = _abs(*row)
+        pyautogui.doubleClick(rx, ry); time.sleep(0.6)
+        sx, sy = _abs(*SEND_XY)
+        pyautogui.click(sx, sy); time.sleep(0.8)
+    print(f"[autopush] -> fan showing {which}")
+
+
 def upload_to_holoscope(video_path):
     if not _GUI:
         return
@@ -325,21 +337,45 @@ FREEZE_FILE = os.path.join(HERE, "freeze.mp4")
 
 
 def poll_loop(base_url):
-    """Poll /api/latest_video; on each new talking clip, transcode + Send it to
-    the fan (Holoscope shows the latest). Pure HTTP, no socket."""
+    """Poll /api/latest_video and drive the fan.
+
+    HOLO_SEND_ONLY=1  -- freeze + talk clips are already transcoded into the File
+        List. While idle/generating the fan shows the FREEZE row; each new reply
+        switches it to the TALK row for the clip's duration, then back.
+    default           -- transcode + Send each new talking clip.
+    """
     base_url = base_url.rstrip("/")
-    print(f"[autopush] polling {base_url}/api/latest_video every {POLL_SECONDS}s ...")
+    print(f"[autopush] polling {base_url}/api/latest_video every {POLL_SECONDS}s "
+          f"({'send-only state loop' if SEND_ONLY else 'transcode+send'})")
     last_version = None
+    showing = None
+    talk_until = 0.0
+
     while True:
+        now = time.time()
         try:
             info = _http_json(f"{base_url}/api/latest_video")
             ver = info.get("version")
+            gen = info.get("is_generating")
+
             if info.get("available") and ver != last_version:
-                if last_version is not None:          # ignore the clip already there at startup
-                    print(f"[autopush] new clip v={ver} ({info.get('duration')}s) -- downloading")
-                    _download(f"{base_url}/api/latest_video/download", OUT_FILE)
-                    upload_to_holoscope(OUT_FILE)
+                if last_version is not None:
+                    dur = float(info.get("duration") or 8.0)
+                    print(f"[autopush] new clip v={ver} ({dur}s)")
+                    if SEND_ONLY:
+                        show_row("talk")
+                        showing, talk_until = "talk", time.time() + dur + 1.0
+                    else:
+                        _download(f"{base_url}/api/latest_video/download", OUT_FILE)
+                        upload_to_holoscope(OUT_FILE)
                 last_version = ver
+
+            elif SEND_ONLY:
+                want = "freeze" if (gen or now >= talk_until) else "talk"
+                if showing != want and (want == "freeze"):
+                    show_row("freeze"); showing = "freeze"
+                elif showing is None:
+                    show_row("freeze"); showing = "freeze"
         except Exception as e:
             print(f"[autopush] poll error: {e}")
         time.sleep(POLL_SECONDS)
