@@ -941,14 +941,15 @@ def get_avatars():
 @app.post("/preprocess_avatar")
 async def preprocess_avatar(
     image: UploadFile = File(None),
-    preset_avatar: str = Form(None)
+    preset_avatar: str = Form(None),
+    skip_bg_remove: bool = Form(False),
 ):
     clear_results_and_temp_files()
 
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     run_dir = os.path.join("temp_files", f"preprocess_{timestamp}")
     os.makedirs(run_dir, exist_ok=True)
-    
+
     image_path = os.path.join(run_dir, "input_avatar.png")
     if image and image.filename:
         with open(image_path, "wb") as buffer:
@@ -961,11 +962,16 @@ async def preprocess_avatar(
             raise HTTPException(status_code=400, detail=f"Preset avatar '{preset_avatar}' not found.")
     else:
         raise HTTPException(status_code=400, detail="Please upload an avatar image or pick a preset avatar.")
-        
+
     output_filename = "avatar_bg_removed.png"
     output_path = os.path.join(run_dir, output_filename)
-    
-    output_path = remove_image_background(image_path, output_path)
+
+    if skip_bg_remove:
+        print(f"[BG Removal] skip_bg_remove is true, using avatar as-is: {image_path}")
+        img = Image.open(image_path)
+        img.convert("RGB").save(output_path, "PNG")
+    else:
+        output_path = remove_image_background(image_path, output_path)
 
     global _last_avatar_image_path
     _last_avatar_image_path = output_path
