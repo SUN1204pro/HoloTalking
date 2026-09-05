@@ -112,13 +112,28 @@ def process_and_save_bg_removed(raw_bytes: bytes, output_path: str):
     else:
         img.convert("RGB").save(output_path, "PNG")
 
+_REMBG_SESSION = None
+
+
+def _get_rembg_session():
+    """u2net_human_seg (whole-person segmentation) instead of rembg's default
+    u2net (generic salient-object): the default model treats dark clothing/
+    headwear (e.g. a black khan dong) as background when it's low-contrast
+    against a dark backdrop, stripping it along with the real background."""
+    global _REMBG_SESSION
+    if _REMBG_SESSION is None:
+        from rembg import new_session
+        _REMBG_SESSION = new_session(os.environ.get("REMBG_MODEL", "u2net_human_seg"))
+    return _REMBG_SESSION
+
+
 def remove_image_background(input_path: str, output_path: str) -> str:
     """Removes background using local rembg library or remove.bg API fallback."""
     print(f"[BG Removal] Processing image: {input_path}")
     try:
         import rembg
         input_img = Image.open(input_path)
-        nobg_img = rembg.remove(input_img)
+        nobg_img = rembg.remove(input_img, session=_get_rembg_session())
         if nobg_img.mode == "RGBA":
             rgb_img = Image.new("RGB", nobg_img.size, (0, 0, 0))
             rgb_img.paste(nobg_img, mask=nobg_img.split()[3])
